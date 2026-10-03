@@ -56,6 +56,48 @@ enum class TCustomSysExCommand : u8
 	SetMT32ReversedStereo = 0x04,
 };
 
+// Experimental Golem control protocol. 0x7D is retained while the protocol is
+// under development; a production manufacturer ID must be selected before the
+// wire format is declared stable.
+constexpr u8 GolemSignature[]      = {0x47, 0x4C, 0x4D}; // "GLM"
+constexpr u8 GolemProtocolVersion = 0x01;
+constexpr size_t GolemHeaderSize  = 8;
+constexpr size_t GolemMaxPayload  = 8;
+
+enum class TGolemCommand : u8
+{
+	GetStatus      = 0x00,
+	SetSynth       = 0x01,
+	SetMT32ROMSet  = 0x02,
+	SetSoundFont   = 0x03,
+};
+
+enum class TGolemResponse : u8
+{
+	Accepted = 0x40,
+	Ready    = 0x41,
+	Error    = 0x42,
+	Status   = 0x43,
+};
+
+enum class TGolemError : u8
+{
+	MalformedRequest   = 0x01,
+	UnsupportedVersion = 0x02,
+	UnknownCommand     = 0x03,
+	InvalidParameter   = 0x04,
+	Unavailable        = 0x05,
+	OperationFailed    = 0x06,
+};
+
+enum TGolemCapability : u16
+{
+	GolemCapabilityStatus       = 1 << 0,
+	GolemCapabilitySetSynth     = 1 << 1,
+	GolemCapabilitySetROMSet    = 1 << 2,
+	GolemCapabilitySetSoundFont = 1 << 3,
+};
+
 CMT32Pi* CMT32Pi::s_pThis = nullptr;
 
 CMT32Pi::CMT32Pi(CI2CMaster* pI2CMaster, CSPIMaster* pSPIMaster, CInterruptSystem* pInterrupt, CGPIOManager* pGPIOManager, CSerialDevice* pSerialDevice, CUSBHCIDevice* pUSBHCI)
@@ -720,6 +762,14 @@ bool CMT32Pi::ParseCustomSysEx(const u8* pData, size_t nSize)
 	if (pData[1] != 0x7D)
 		return false;
 
+	// Versioned Golem messages use a three-byte signature so they cannot
+	// collide with the original five-byte mt32-pi commands.
+	if (nSize >= 5 &&
+	    pData[2] == GolemSignature[0] &&
+	    pData[3] == GolemSignature[1] &&
+	    pData[4] == GolemSignature[2])
+		return ParseGolemSysEx(pData, nSize);
+
 	const auto Command = static_cast<TCustomSysExCommand>(pData[2]);
 
 	// Reboot (F0 7D 00 F7)
@@ -768,6 +818,221 @@ bool CMT32Pi::ParseCustomSysEx(const u8* pData, size_t nSize)
 		default:
 			return false;
 	}
+}
+
+bool CMT32Pi::ParseGolemSysEx(const u8* pData, size_t nSize)
+{
+	// Request: F0 7D 47 4C 4D vv tt cc [payload...] F7
+	if (nSize < GolemHeaderSize + 1)
+		return true;
+
+	const u8 nVersion     = pData[5];
+	const u8 nTransaction = pData[6];
+	const u8 nCommand     = pData[7];
+	const auto Command    = static_cast<TGolemCommand>(nCommand);
+
+	if (pData[nSize - 1] != 0xF7)
+	{
+		SendGolemError(nTransaction, nCommand, static_cast<u8>(TGolemError::MalformedRequest));
+		return true;
+	}
+
+	if (nVersion != GolemProtocolVersion)
+	{
+		SendGolemError(nTransaction, nCommand, static_cast<u8>(TGolemError::UnsupportedVersion));
+		return true;
+	}
+
+	switch (Command)
+	{
+		case TGolemCommand::GetStatus:
+			if (nSize != GolemHeaderSize + 1)
+			{
+				SendGolemError(nTransaction, nCommand, static_cast<u8>(TGolemError::MalformedRequest));
+				return true;
+			}
+
+			SendGolemResponse(nTransaction, static_cast<u8>(TGolemResponse::Accepted), nCommand);
+			SendGolemStatus(nTransaction);
+			return true;
+
+		case TGolemCommand::SetSynth:
+		{
+			if (nSize != GolemHeaderSize + 2)
+			{
+				SendGolemError(nTransaction, nCommand, static_cast<u8>(TGolemError::MalformedRequest));
+				return true;
+			}
+
+			const u8 nSynth = pData[8];
+			if (nSynth > static_cast<u8>(TSynth::SoundFont))
+			{
+				SendGolemError(nTransaction, nCommand, static_cast<u8>(TGolemError::InvalidParameter));
+				return true;
+			}
+
+			CSynthBase* pRequestedSynth = nullptr;
+			if (nSynth == static_cast<u8>(TSynth::MT32))
+				pRequestedSynth = m_pMT32Synth;
+			else
+				pRequestedSynth = m_pSoundFontSynth;
+			if (pRequestedSynth == nullptr)
+			{
+				SendGolemError(nTransaction, nCommand, static_cast<u8>(TGolemError::Unavailable));
+				return true;
+			}
+
+			SendGolemResponse(nTransaction, static_cast<u8>(TGolemResponse::Accepted), nCommand);
+			SwitchSynth(static_cast<TSynth>(nSynth));
+			if (m_pCurrentSynth == pRequestedSynth)
+				SendGolemResponse(nTransaction, static_cast<u8>(TGolemResponse::Ready), nCommand, &nSynth, 1);
+			else
+				SendGolemError(nTransaction, nCommand, static_cast<u8>(TGolemError::OperationFailed));
+			return true;
+		}
+
+		case TGolemCommand::SetMT32ROMSet:
+		{
+			if (nSize != GolemHeaderSize + 2)
+			{
+				SendGolemError(nTransaction, nCommand, static_cast<u8>(TGolemError::MalformedRequest));
+				return true;
+			}
+
+			const u8 nROMSet = pData[8];
+			if (nROMSet >= static_cast<u8>(TMT32ROMSet::Any))
+			{
+				SendGolemError(nTransaction, nCommand, static_cast<u8>(TGolemError::InvalidParameter));
+				return true;
+			}
+
+			const auto ROMSet = static_cast<TMT32ROMSet>(nROMSet);
+			if (m_pMT32Synth == nullptr || !m_pMT32Synth->GetROMManager().HaveROMSet(ROMSet))
+			{
+				SendGolemError(nTransaction, nCommand, static_cast<u8>(TGolemError::Unavailable));
+				return true;
+			}
+
+			SendGolemResponse(nTransaction, static_cast<u8>(TGolemResponse::Accepted), nCommand);
+			SwitchMT32ROMSet(ROMSet);
+			if (m_pMT32Synth->GetROMSet() == ROMSet)
+				SendGolemResponse(nTransaction, static_cast<u8>(TGolemResponse::Ready), nCommand, &nROMSet, 1);
+			else
+				SendGolemError(nTransaction, nCommand, static_cast<u8>(TGolemError::OperationFailed));
+			return true;
+		}
+
+		case TGolemCommand::SetSoundFont:
+		{
+			if (nSize != GolemHeaderSize + 3)
+			{
+				SendGolemError(nTransaction, nCommand, static_cast<u8>(TGolemError::MalformedRequest));
+				return true;
+			}
+
+			const size_t nSoundFont = pData[8] | (static_cast<size_t>(pData[9]) << 7);
+			if (m_pSoundFontSynth == nullptr ||
+			    nSoundFont >= m_pSoundFontSynth->GetSoundFontManager().GetSoundFontCount())
+			{
+				SendGolemError(nTransaction, nCommand, static_cast<u8>(TGolemError::Unavailable));
+				return true;
+			}
+
+			const u8 Payload[] = {static_cast<u8>(nSoundFont & 0x7F), static_cast<u8>((nSoundFont >> 7) & 0x7F)};
+			SendGolemResponse(nTransaction, static_cast<u8>(TGolemResponse::Accepted), nCommand);
+			SwitchSoundFont(nSoundFont);
+			if (m_pSoundFontSynth->GetSoundFontIndex() == nSoundFont)
+				SendGolemResponse(nTransaction, static_cast<u8>(TGolemResponse::Ready), nCommand, Payload, sizeof(Payload));
+			else
+				SendGolemError(nTransaction, nCommand, static_cast<u8>(TGolemError::OperationFailed));
+			return true;
+		}
+
+		default:
+			SendGolemError(nTransaction, nCommand, static_cast<u8>(TGolemError::UnknownCommand));
+			return true;
+	}
+}
+
+bool CMT32Pi::SendGolemResponse(u8 nTransaction, u8 nResponse, u8 nCommand, const u8* pPayload, size_t nPayloadSize)
+{
+	if (!m_bSerialMIDIEnabled || m_pSerial == nullptr || nPayloadSize > GolemMaxPayload)
+		return false;
+
+	u8 Message[GolemHeaderSize + GolemMaxPayload + 2];
+	size_t nSize = 0;
+	Message[nSize++] = 0xF0;
+	Message[nSize++] = 0x7D;
+	Message[nSize++] = GolemSignature[0];
+	Message[nSize++] = GolemSignature[1];
+	Message[nSize++] = GolemSignature[2];
+	Message[nSize++] = GolemProtocolVersion;
+	Message[nSize++] = nTransaction;
+	Message[nSize++] = nResponse;
+	Message[nSize++] = nCommand;
+
+	for (size_t i = 0; i < nPayloadSize; ++i)
+		Message[nSize++] = pPayload[i] & 0x7F;
+
+	Message[nSize++] = 0xF7;
+
+	const int nResult = m_pSerial->Write(Message, nSize);
+	if (nResult != static_cast<int>(nSize))
+	{
+		LOGERR("Golem response: sent %d of %d bytes", nResult, static_cast<int>(nSize));
+		return false;
+	}
+
+	return true;
+}
+
+void CMT32Pi::SendGolemError(u8 nTransaction, u8 nCommand, u8 nError)
+{
+	SendGolemResponse(nTransaction, static_cast<u8>(TGolemResponse::Error), nCommand, &nError, 1);
+}
+
+void CMT32Pi::SendGolemStatus(u8 nTransaction)
+{
+	constexpr u16 Capabilities = GolemCapabilityStatus |
+	                             GolemCapabilitySetSynth |
+	                             GolemCapabilitySetROMSet |
+	                             GolemCapabilitySetSoundFont;
+
+	u8 nAvailability = 0;
+	if (m_pMT32Synth)
+		nAvailability |= 1 << 0;
+	if (m_pSoundFontSynth)
+		nAvailability |= 1 << 1;
+
+	u8 nSynth = 0x7F;
+	if (m_pCurrentSynth == m_pMT32Synth && m_pMT32Synth)
+		nSynth = static_cast<u8>(TSynth::MT32);
+	else if (m_pCurrentSynth == m_pSoundFontSynth && m_pSoundFontSynth)
+		nSynth = static_cast<u8>(TSynth::SoundFont);
+
+	u8 nROMSet = 0x7F;
+	if (m_pMT32Synth)
+		nROMSet = static_cast<u8>(m_pMT32Synth->GetROMSet());
+
+	size_t nSoundFont = 0x3FFF;
+	if (m_pSoundFontSynth)
+		nSoundFont = m_pSoundFontSynth->GetSoundFontIndex();
+
+	const u8 Payload[] = {
+		static_cast<u8>(Capabilities & 0x7F),
+		static_cast<u8>((Capabilities >> 7) & 0x7F),
+		nAvailability,
+		nSynth,
+		nROMSet,
+		static_cast<u8>(nSoundFont & 0x7F),
+		static_cast<u8>((nSoundFont >> 7) & 0x7F),
+	};
+
+	SendGolemResponse(nTransaction,
+	                  static_cast<u8>(TGolemResponse::Status),
+	                  static_cast<u8>(TGolemCommand::GetStatus),
+	                  Payload,
+	                  sizeof(Payload));
 }
 
 void CMT32Pi::UpdateUSB(bool bStartup)

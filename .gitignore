@@ -1,5 +1,6 @@
 # Build directories
 build-*
+__pycache__/
 sdcard/*
 !sdcard/*.cfg
 !sdcard/*.txt

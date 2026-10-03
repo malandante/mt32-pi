@@ -1,3 +1,8 @@
+> **Golem fork:** This fork adds an experimental, bidirectional UART control
+> protocol for MT32-Next/Golem. It preserves the original mt32-pi SysEx
+> commands and adds transaction-correlated `ACCEPTED`, `READY`, `ERROR`, and
+> `STATUS` replies. See [the Golem control protocol](docs/golem-control-protocol.md).
+
 ## Please note
 
 **It's unlikely that there will be any further releases of mt32-pi.**
