@@ -93,6 +93,12 @@ bool CKernel::Initialize(void)
 	if (bSerialMIDIAvailable && !m_Serial.Initialize(m_Config.MIDIGPIOBaudRate))
 		return false;
 
+	// MIDI output (software thru, Golem responses) must be sent byte for byte.
+	// Circle's serial device translates NL (0x0A) to CR+NL by default, which
+	// inserts a 0x0D after every 0x0A data byte.
+	if (bSerialMIDIAvailable)
+		m_Serial.SetOptions(0);
+
 	// Init I2C; don't bother with Initialize() as it only sets the clock to 100/400KHz
 	m_I2CMaster.SetClock(m_Config.SystemI2CBaudRate);
 
