@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [golem-1.0.0] - 2026-10-08
+
+Golem fork of mt32-pi 0.13.1, for golem-next 1.0.0 on the ZX Spectrum Next. This
+is not an official mt32-pi release; please report problems to
+https://github.com/malandante/mt32-pi/issues, not to the mt32-pi author.
+
+### Added
+
+- Golem control protocol over the MIDI UART (`F0 7D 47 4C 4D 01 ...`): engine,
+  ROM set and SoundFont changes and a status query, each answered with
+  `ACCEPTED`, then `READY`, `STATUS` or `ERROR`, matched by transaction. The
+  original mt32-pi SysEx commands are unchanged. See
+  `docs/golem-control-protocol.md`.
+
+### Fixed
+
+- Serial MIDI output is sent byte for byte (no NL to CR+NL translation), so
+  replies reach the Next intact.
+
 ## [0.13.1] - 2023-03-18
 
 ### Changed
