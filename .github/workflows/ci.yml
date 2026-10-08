@@ -1,6 +1,16 @@
 name: mt32-pi CI
 
-on: [push, pull_request]
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to create and publish (golem-1.0.0)
+        required: true
+
+permissions:
+  contents: write
 
 env:
   toolchain-version: 11.3.rel1
@@ -43,6 +53,9 @@ jobs:
     steps:
     - uses: actions/checkout@v3
 
+    - name: Install build dependencies
+      run: sudo apt-get update && sudo apt-get install -y libglib2.0-dev
+
     - name: Fetch submodules
       run: make submodules
 
@@ -82,7 +95,7 @@ jobs:
       run: make -j BOARD=${{ matrix.board }}
 
     - name: Upload built kernel
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: kernels
         path: kernel*.img
@@ -91,12 +104,13 @@ jobs:
       run: make clean && make -j BOARD=${{ matrix.board }} HDMI_CONSOLE=1
 
     - name: Upload built kernel
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: kernels-hdmi
         path: kernel*.img
 
   package:
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
     needs: build
     runs-on: ubuntu-latest
     env:
@@ -195,13 +209,14 @@ jobs:
 
     - name: Download GeneralUser GS SoundFont if not retrieved from cache
       if: steps.cache-generaluser-gs.outputs.cache-hit != 'true'
+      continue-on-error: true   # Google Drive may refuse; the SD card then ships without it
       run: |
         sudo pip install gdown
         gdown -q https://drive.google.com/uc?id=1ypgJwuHqqXx-jeCXLRFqgBAEemJZnDrj
         unzip "GeneralUser GS v1.511.zip"
 
     - name: Retrieve built kernels
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: kernels
         path: sdcard
@@ -209,43 +224,41 @@ jobs:
     - name: Add extra files to SD card directory
       run: |
         mkdir sdcard/docs
-        cp "GeneralUser GS v1.511/GeneralUser GS v1.511.sf2" sdcard/soundfonts
-        cp "GeneralUser GS v1.511/CHANGELOG.md" sdcard/docs/CHANGELOG.GeneralUserGS
-        cp "GeneralUser GS v1.511/LICENSE.txt" sdcard/docs/LICENSE.GeneralUserGS
+        if [ -f "GeneralUser GS v1.511/GeneralUser GS v1.511.sf2" ]; then
+          cp "GeneralUser GS v1.511/GeneralUser GS v1.511.sf2" sdcard/soundfonts
+          cp "GeneralUser GS v1.511/CHANGELOG.md" sdcard/docs/CHANGELOG.GeneralUserGS
+          cp "GeneralUser GS v1.511/LICENSE.txt" sdcard/docs/LICENSE.GeneralUserGS
+        fi
         cp LICENSE sdcard/docs
         cp README.md sdcard/docs
 
     - name: Upload SD card archive
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: sdcard
         path: sdcard
 
-    - name: Get version (git tag)
-      if: startsWith(github.ref, 'refs/tags/')
+    - name: Get version (tag pushed or given to a manual run)
       id: get_version
-      run: echo ::set-output name=version::${GITHUB_REF#refs/tags/v}
+      run: |
+        tag="${{ inputs.tag }}"
+        if [[ -z "$tag" && "$GITHUB_REF" == refs/tags/* ]]; then tag="${GITHUB_REF#refs/tags/}"; fi
+        echo "tag=$tag" >> "$GITHUB_OUTPUT"
+        echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
 
     - name: Create release package
-      if: startsWith(github.ref, 'refs/tags/')
+      if: steps.get_version.outputs.tag != ''
       run: cd sdcard; zip -r ../mt32-pi-${{ steps.get_version.outputs.version }}.zip *
 
-    - name: Release
-      uses: docker://antonyurchenko/git-release:latest
-      if: startsWith(github.ref, 'refs/tags/')
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        DRAFT_RELEASE: "false"
-        PRE_RELEASE: "false"
-        CHANGELOG_FILE: "CHANGELOG.md"
-        ALLOW_EMPTY_CHANGELOG: "false"
-      with:
-        args: |
-            mt32-pi-*.zip
-
-    - name: Notify Discord servers of release
-      if: startsWith(github.ref, 'refs/tags/')
+    - name: Release notes (CHANGELOG entry of this tag)
+      if: steps.get_version.outputs.tag != ''
       run: |
-        sudo pip3 install keepachangelog discord-webhook
-        .github/scripts/discord_notify.py ${{ secrets.MISTER_DISCORD_WEBHOOK }} ${{ steps.get_version.outputs.version }}
-        .github/scripts/discord_notify.py ${{ secrets.FPGAMING_DISCORD_WEBHOOK }} ${{ steps.get_version.outputs.version }}
+        awk -v t="${{ steps.get_version.outputs.tag }}" 'index($0, "## [" t "]") == 1 {p = 1; next} /^## \[/ {p = 0} p' CHANGELOG.md > notes.md
+        test -s notes.md
+        { echo; echo '### SHA-256'; echo '```'; sha256sum mt32-pi-*.zip; echo '```'; } >> notes.md
+
+    - name: Release
+      if: steps.get_version.outputs.tag != ''
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: gh release create "${{ steps.get_version.outputs.tag }}" mt32-pi-*.zip --target "$GITHUB_SHA" --title "mt32-pi Golem fork ${{ steps.get_version.outputs.tag }}" --notes-file notes.md
