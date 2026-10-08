@@ -124,6 +124,10 @@ private:
 	void PurgeMIDIBuffers();
 	size_t ReceiveSerialMIDI(u8* pOutData, size_t nSize);
 	bool ParseCustomSysEx(const u8* pData, size_t nSize);
+	bool ParseGolemSysEx(const u8* pData, size_t nSize);
+	bool SendGolemResponse(u8 nTransaction, u8 nResponse, u8 nCommand, const u8* pPayload = nullptr, size_t nPayloadSize = 0);
+	void SendGolemError(u8 nTransaction, u8 nCommand, u8 nError);
+	void SendGolemStatus(u8 nTransaction);
 
 	void ProcessEventQueue();
 	void ProcessButtonEvent(const TButtonEvent& Event);
