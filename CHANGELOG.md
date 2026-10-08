@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [golem-1.0.1] - 2026-10-08
+
+### Fixed
+
+- The SD card package of golem-1.0.0 only had the Raspberry Pi 4 kernel. It now
+  has the kernels for Pi 2/3 (32-bit), Pi 3 (64-bit) and Pi 4.
+
+### Note
+
+- No SoundFont is included: put at least one `.sf2` in `soundfonts/` for General
+  MIDI (for example GeneralUser GS).
+
 ## [golem-1.0.0] - 2026-10-08
 
 Golem fork of mt32-pi 0.13.1, for golem-next 1.0.0 on the ZX Spectrum Next. This
