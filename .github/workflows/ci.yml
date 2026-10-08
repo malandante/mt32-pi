@@ -1,6 +1,13 @@
 name: mt32-pi CI
 
-on: [push, pull_request]
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to create and publish (golem-1.0.0)
+        required: true
 
 permissions:
   contents: write
@@ -103,7 +110,7 @@ jobs:
         path: kernel*.img
 
   package:
-    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
     needs: build
     runs-on: ubuntu-latest
     env:
@@ -231,24 +238,27 @@ jobs:
         name: sdcard
         path: sdcard
 
-    - name: Get version (git tag)
-      if: startsWith(github.ref, 'refs/tags/')
+    - name: Get version (tag pushed or given to a manual run)
       id: get_version
-      run: echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+      run: |
+        tag="${{ inputs.tag }}"
+        if [[ -z "$tag" && "$GITHUB_REF" == refs/tags/* ]]; then tag="${GITHUB_REF#refs/tags/}"; fi
+        echo "tag=$tag" >> "$GITHUB_OUTPUT"
+        echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
 
     - name: Create release package
-      if: startsWith(github.ref, 'refs/tags/')
+      if: steps.get_version.outputs.tag != ''
       run: cd sdcard; zip -r ../mt32-pi-${{ steps.get_version.outputs.version }}.zip *
 
     - name: Release notes (CHANGELOG entry of this tag)
-      if: startsWith(github.ref, 'refs/tags/')
+      if: steps.get_version.outputs.tag != ''
       run: |
-        awk -v t="${GITHUB_REF_NAME}" 'index($0, "## [" t "]") == 1 {p = 1; next} /^## \[/ {p = 0} p' CHANGELOG.md > notes.md
+        awk -v t="${{ steps.get_version.outputs.tag }}" 'index($0, "## [" t "]") == 1 {p = 1; next} /^## \[/ {p = 0} p' CHANGELOG.md > notes.md
         test -s notes.md
         { echo; echo '### SHA-256'; echo '```'; sha256sum mt32-pi-*.zip; echo '```'; } >> notes.md
 
     - name: Release
-      if: startsWith(github.ref, 'refs/tags/')
+      if: steps.get_version.outputs.tag != ''
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: gh release create "$GITHUB_REF_NAME" mt32-pi-*.zip --title "mt32-pi Golem fork ${GITHUB_REF_NAME}" --notes-file notes.md
+      run: gh release create "${{ steps.get_version.outputs.tag }}" mt32-pi-*.zip --target "$GITHUB_SHA" --title "mt32-pi Golem fork ${{ steps.get_version.outputs.tag }}" --notes-file notes.md
