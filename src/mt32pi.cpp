@@ -70,6 +70,7 @@ enum class TGolemCommand : u8
 	SetSynth       = 0x01,
 	SetMT32ROMSet  = 0x02,
 	SetSoundFont   = 0x03,
+	SetUSBOut      = 0x04,
 };
 
 enum class TGolemResponse : u8
@@ -96,7 +97,11 @@ enum TGolemCapability : u16
 	GolemCapabilitySetSynth     = 1 << 1,
 	GolemCapabilitySetROMSet    = 1 << 2,
 	GolemCapabilitySetSoundFont = 1 << 3,
+	GolemCapabilitySetUSBOut    = 1 << 4,
 };
+
+// SET_USB_OUT parameter that only reports the current mode
+constexpr u8 GolemUSBOutQuery = 0x7F;
 
 CMT32Pi* CMT32Pi::s_pThis = nullptr;
 
@@ -143,7 +148,7 @@ CMT32Pi::CMT32Pi(CI2CMaster* pI2CMaster, CSPIMaster* pSPIMaster, CInterruptSyste
 
 	  m_bSerialMIDIAvailable(false),
 	  m_bSerialMIDIEnabled(false),
-	  m_pUSBMIDIDevice(nullptr),
+	  m_pUSBMIDIDevices{},
 	  m_pUSBSerialDevice(nullptr),
 	  m_pUSBMassStorageDevice(nullptr),
 
@@ -161,7 +166,11 @@ CMT32Pi::CMT32Pi(CI2CMaster* pI2CMaster, CSPIMaster* pSPIMaster, CInterruptSyste
 	  m_nMasterVolume(100),
 	  m_pCurrentSynth(nullptr),
 	  m_pMT32Synth(nullptr),
-	  m_pSoundFontSynth(nullptr)
+	  m_pSoundFontSynth(nullptr),
+
+	  m_ExternalMIDIParser(this),
+	  m_USBOutMode(CConfig::TMIDIUSBOut::Off),
+	  m_nUSBTxDroppedReported(0)
 {
 	s_pThis = this;
 }
@@ -174,6 +183,7 @@ bool CMT32Pi::Initialize(bool bSerialMIDIAvailable)
 {
 	m_bSerialMIDIAvailable = bSerialMIDIAvailable;
 	m_bSerialMIDIEnabled = bSerialMIDIAvailable;
+	m_USBOutMode = m_pConfig->MIDIUSBOut;
 
 	switch (m_pConfig->LCDType)
 	{
@@ -465,6 +475,9 @@ void CMT32Pi::MainTask()
 		// Process MIDI data
 		UpdateMIDI();
 
+		// Send forwarded MIDI to USB devices
+		FlushUSBMIDI();
+
 		// Process network packets
 		UpdateNetwork();
 
@@ -692,7 +705,75 @@ void CMT32Pi::OnUnderVoltageDetected()
 	LCDLog(TLCDLogType::Warning, "Low voltage! Chk PSU");
 }
 
+// MIDI from the host: GPIO serial (the Next) and network MIDI
 void CMT32Pi::OnShortMessage(u32 nMessage)
+{
+	if (m_USBOutMode != CConfig::TMIDIUSBOut::Off)
+		QueueUSBShortMessage(nMessage);
+
+	// Bridge mode: the synth stays silent while the host plays a USB device
+	if (m_USBOutMode == CConfig::TMIDIUSBOut::Bridge)
+	{
+		if ((nMessage & 0xFF) < 0xF0)
+			LEDOn();
+		return;
+	}
+
+	HandleShortMessage(nMessage);
+}
+
+void CMT32Pi::OnSysExMessage(const u8* pData, size_t nSize)
+{
+	// Flash LED
+	LEDOn();
+
+	// mt32-pi and Golem control messages are consumed here and never forwarded
+	if (!ParseCustomSysEx(pData, nSize))
+	{
+		if (m_USBOutMode != CConfig::TMIDIUSBOut::Off)
+			QueueUSBSysEx(pData, nSize);
+
+		if (m_USBOutMode != CConfig::TMIDIUSBOut::Bridge)
+			m_pCurrentSynth->HandleMIDISysExMessage(pData, nSize);
+	}
+
+	// Wake from power saving mode if necessary
+	Awaken();
+}
+
+// MIDI from USB devices, USB serial or the Pisound: always reaches the synth
+void CMT32Pi::OnExternalShortMessage(u32 nMessage)
+{
+	if (m_pConfig->MIDIUSBInThru)
+		QueueUSBShortMessage(nMessage);
+
+	HandleShortMessage(nMessage);
+}
+
+void CMT32Pi::OnExternalSysExMessage(const u8* pData, size_t nSize)
+{
+	// Golem replies always go to the GPIO serial port, so a Golem request
+	// from another source would answer the wrong device: ignore it.
+	if (nSize >= 5 && pData[1] == 0x7D &&
+	    pData[2] == GolemSignature[0] &&
+	    pData[3] == GolemSignature[1] &&
+	    pData[4] == GolemSignature[2])
+		return;
+
+	LEDOn();
+
+	if (!ParseCustomSysEx(pData, nSize))
+	{
+		if (m_pConfig->MIDIUSBInThru)
+			QueueUSBSysEx(pData, nSize);
+
+		m_pCurrentSynth->HandleMIDISysExMessage(pData, nSize);
+	}
+
+	Awaken();
+}
+
+void CMT32Pi::HandleShortMessage(u32 nMessage)
 {
 	// Active sensing
 	if (nMessage == 0xFE)
@@ -711,17 +792,102 @@ void CMT32Pi::OnShortMessage(u32 nMessage)
 	Awaken();
 }
 
-void CMT32Pi::OnSysExMessage(const u8* pData, size_t nSize)
+void CMT32Pi::QueueUSBShortMessage(u32 nMessage)
 {
-	// Flash LED
-	LEDOn();
+	u8 Packet[USBMIDI::PacketSize];
+	if (USBMIDI::EncodeShortMessage(nMessage, 0, Packet))
+		m_USBTxQueue.Push(Packet, sizeof(Packet));
+}
 
-	// If we don't consume the SysEx message, forward it to the synthesizer
-	if (!ParseCustomSysEx(pData, nSize))
-		m_pCurrentSynth->HandleMIDISysExMessage(pData, nSize);
+void CMT32Pi::QueueUSBSysEx(const u8* pData, size_t nSize)
+{
+	// The parser's SysEx buffer is 1000 bytes, so this always fits
+	u8 Packets[USBMIDI::SysExEncodedSize(1000)];
+	if (nSize > 1000)
+		return;
 
-	// Wake from power saving mode if necessary
-	Awaken();
+	const size_t nEncoded = USBMIDI::EncodeSysEx(pData, nSize, 0, Packets);
+	if (nEncoded)
+		m_USBTxQueue.Push(Packets, nEncoded);
+}
+
+size_t CMT32Pi::GetUSBMIDIDeviceCount() const
+{
+	size_t nCount = 0;
+	for (CUSBMIDIDevice* pDevice : m_pUSBMIDIDevices)
+		if (pDevice)
+			++nCount;
+	return nCount;
+}
+
+// Send queued USB MIDI event packets to every attached USB MIDI device.
+// Called from the main loop so the synchronous USB transfer never runs in the
+// middle of parsing.
+void CMT32Pi::FlushUSBMIDI()
+{
+	if (m_USBTxQueue.GetCount() == 0)
+		return;
+
+	if (GetUSBMIDIDeviceCount() == 0)
+	{
+		m_USBTxQueue.Clear();
+		return;
+	}
+
+	// Bound the work per main loop iteration
+	u8 Buffer[256];
+	for (size_t nBatches = 0; nBatches < 4; ++nBatches)
+	{
+		const size_t nSize = m_USBTxQueue.Pop(Buffer, sizeof(Buffer));
+		if (nSize == 0)
+			break;
+
+		for (CUSBMIDIDevice* pDevice : m_pUSBMIDIDevices)
+			if (pDevice && !pDevice->SendEventPackets(Buffer, nSize) && m_pConfig->SystemVerbose)
+				LOGWARN("USB MIDI send failed");
+	}
+
+	if (m_USBTxQueue.GetDropped() != m_nUSBTxDroppedReported)
+	{
+		m_nUSBTxDroppedReported = m_USBTxQueue.GetDropped();
+		LOGWARN("USB MIDI output overflow");
+		LCDLog(TLCDLogType::Error, "USB out overflow!");
+	}
+}
+
+void CMT32Pi::SetUSBOutMode(CConfig::TMIDIUSBOut Mode)
+{
+	if (Mode == m_USBOutMode)
+		return;
+
+	const CConfig::TMIDIUSBOut OldMode = m_USBOutMode;
+	m_USBOutMode = Mode;
+
+	// Leaving forwarding: release notes held on the USB device
+	// (CC 120 All Sound Off and CC 123 All Notes Off on every channel)
+	if (Mode == CConfig::TMIDIUSBOut::Off)
+	{
+		for (u32 nChannel = 0; nChannel < 16; ++nChannel)
+		{
+			QueueUSBShortMessage(0xB0 | nChannel | 120 << 8);
+			QueueUSBShortMessage(0xB0 | nChannel | 123 << 8);
+		}
+	}
+
+	// Entering bridge mode: notes already sounding would never get a Note Off
+	if (Mode == CConfig::TMIDIUSBOut::Bridge || OldMode == CConfig::TMIDIUSBOut::Bridge)
+	{
+		if (m_pMT32Synth)
+			m_pMT32Synth->AllSoundOff();
+		if (m_pSoundFontSynth)
+			m_pSoundFontSynth->AllSoundOff();
+	}
+
+	const char* pModeName = Mode == CConfig::TMIDIUSBOut::Off    ? "off" :
+	                        Mode == CConfig::TMIDIUSBOut::Thru   ? "on" :
+	                                                               "bridge";
+	LOGNOTE("USB MIDI out: %s", pModeName);
+	LCDLog(TLCDLogType::Notice, "USB out: %s", pModeName);
 }
 
 void CMT32Pi::OnUnexpectedStatus()
@@ -948,6 +1114,34 @@ bool CMT32Pi::ParseGolemSysEx(const u8* pData, size_t nSize)
 			return true;
 		}
 
+		case TGolemCommand::SetUSBOut:
+		{
+			// Payload: 0 = off, 1 = on (synth also plays), 2 = bridge (synth
+			// silent), 0x7F = report only. READY carries the mode and the
+			// number of attached USB MIDI devices.
+			if (nSize != GolemHeaderSize + 2)
+			{
+				SendGolemError(nTransaction, nCommand, static_cast<u8>(TGolemError::MalformedRequest));
+				return true;
+			}
+
+			const u8 nMode = pData[8];
+			if (nMode > static_cast<u8>(CConfig::TMIDIUSBOut::Bridge) && nMode != GolemUSBOutQuery)
+			{
+				SendGolemError(nTransaction, nCommand, static_cast<u8>(TGolemError::InvalidParameter));
+				return true;
+			}
+
+			SendGolemResponse(nTransaction, static_cast<u8>(TGolemResponse::Accepted), nCommand);
+			if (nMode != GolemUSBOutQuery)
+				SetUSBOutMode(static_cast<CConfig::TMIDIUSBOut>(nMode));
+
+			const size_t nDevices = GetUSBMIDIDeviceCount();
+			const u8 Payload[] = {static_cast<u8>(m_USBOutMode), static_cast<u8>(nDevices)};
+			SendGolemResponse(nTransaction, static_cast<u8>(TGolemResponse::Ready), nCommand, Payload, sizeof(Payload));
+			return true;
+		}
+
 		default:
 			SendGolemError(nTransaction, nCommand, static_cast<u8>(TGolemError::UnknownCommand));
 			return true;
@@ -996,7 +1190,8 @@ void CMT32Pi::SendGolemStatus(u8 nTransaction)
 	constexpr u16 Capabilities = GolemCapabilityStatus |
 	                             GolemCapabilitySetSynth |
 	                             GolemCapabilitySetROMSet |
-	                             GolemCapabilitySetSoundFont;
+	                             GolemCapabilitySetSoundFont |
+	                             GolemCapabilitySetUSBOut;
 
 	u8 nAvailability = 0;
 	if (m_pMT32Synth)
@@ -1089,12 +1284,25 @@ void CMT32Pi::UpdateUSB(bool bStartup)
 	}
 	m_pUSBMassStorageDevice = pUSBMassStorageDevice;
 
-	if (!m_pUSBMIDIDevice && (m_pUSBMIDIDevice = static_cast<CUSBMIDIDevice*>(CDeviceNameService::Get()->GetDevice("umidi1", FALSE))))
+	// USB MIDI devices are parsed separately from GPIO serial MIDI, so the
+	// Next keeps working (and receiving Golem replies) while a USB interface
+	// or keyboard is attached.
+	for (size_t i = 0; i < MaxUSBMIDIDevices; ++i)
 	{
-		m_pUSBMIDIDevice->RegisterRemovedHandler(USBMIDIDeviceRemovedHandler, &m_pUSBMIDIDevice);
-		m_pUSBMIDIDevice->RegisterPacketHandler(USBMIDIPacketHandler);
-		LOGNOTE("Using USB MIDI interface");
-		m_bSerialMIDIEnabled = false;
+		if (m_pUSBMIDIDevices[i])
+			continue;
+
+		CString DeviceName;
+		DeviceName.Format("umidi%u", static_cast<unsigned>(i + 1));
+		CUSBMIDIDevice* pDevice = static_cast<CUSBMIDIDevice*>(CDeviceNameService::Get()->GetDevice(DeviceName, FALSE));
+		if (!pDevice)
+			continue;
+
+		m_pUSBMIDIDevices[i] = pDevice;
+		pDevice->RegisterRemovedHandler(USBMIDIDeviceRemovedHandler, &m_pUSBMIDIDevices[i]);
+		pDevice->RegisterPacketHandler(USBMIDIPacketHandler);
+		LOGNOTE("Using USB MIDI interface %s", static_cast<const char*>(DeviceName));
+		LCDLog(TLCDLogType::Notice, "USB MIDI %u connected", static_cast<unsigned>(i + 1));
 	}
 
 	if (!m_pUSBSerialDevice && (m_pUSBSerialDevice = static_cast<CUSBSerialDevice*>(CDeviceNameService::Get()->GetDevice("utty1", FALSE))))
@@ -1102,7 +1310,6 @@ void CMT32Pi::UpdateUSB(bool bStartup)
 		m_pUSBSerialDevice->SetBaudRate(m_pConfig->MIDIUSBSerialBaudRate);
 		m_pUSBSerialDevice->RegisterRemovedHandler(USBMIDIDeviceRemovedHandler, &m_pUSBSerialDevice);
 		LOGNOTE("Using USB serial interface");
-		m_bSerialMIDIEnabled = false;
 	}
 }
 
@@ -1178,27 +1385,36 @@ void CMT32Pi::UpdateNetwork()
 void CMT32Pi::UpdateMIDI()
 {
 	size_t nBytes;
+	bool bReceived = false;
 	u8 Buffer[MIDIRxBufferSize];
 
-	// Read MIDI messages from serial device or ring buffer
-	if (m_bSerialMIDIEnabled)
-		nBytes = ReceiveSerialMIDI(Buffer, sizeof(Buffer));
-	else if (m_pUSBSerialDevice)
+	// Host MIDI: GPIO serial (the Next)
+	if (m_bSerialMIDIEnabled && (nBytes = ReceiveSerialMIDI(Buffer, sizeof(Buffer))) > 0)
+	{
+		ParseMIDIBytes(Buffer, nBytes);
+		bReceived = true;
+	}
+
+	// External MIDI: USB serial, then USB MIDI/Pisound ring buffer
+	if (m_pUSBSerialDevice)
 	{
 		const int nResult = m_pUSBSerialDevice->Read(Buffer, sizeof(Buffer));
-		nBytes = nResult > 0 ? static_cast<size_t>(nResult) : 0;
+		if (nResult > 0)
+		{
+			m_ExternalMIDIParser.ParseMIDIBytes(Buffer, static_cast<size_t>(nResult));
+			bReceived = true;
+		}
 	}
-	else
-		nBytes = m_MIDIRxBuffer.Dequeue(Buffer, sizeof(Buffer));
 
-	if (nBytes == 0)
-		return;
-
-	// Process MIDI messages
-	ParseMIDIBytes(Buffer, nBytes);
+	if ((nBytes = m_MIDIRxBuffer.Dequeue(Buffer, sizeof(Buffer))) > 0)
+	{
+		m_ExternalMIDIParser.ParseMIDIBytes(Buffer, nBytes);
+		bReceived = true;
+	}
 
 	// Reset the Active Sense timer
-	s_pThis->m_nActiveSenseTime = s_pThis->m_pTimer->GetTicks();
+	if (bReceived)
+		m_nActiveSenseTime = m_pTimer->GetTicks();
 }
 
 void CMT32Pi::PurgeMIDIBuffers()
@@ -1210,11 +1426,12 @@ void CMT32Pi::PurgeMIDIBuffers()
 	while (m_bSerialMIDIEnabled && (nBytes = ReceiveSerialMIDI(Buffer, sizeof(Buffer))) > 0)
 		ParseMIDIBytes(Buffer, nBytes, true);
 
-	while (m_pUSBSerialDevice && (nBytes = m_pUSBSerialDevice->Read(Buffer, sizeof(Buffer))) > 0)
-		ParseMIDIBytes(Buffer, nBytes, true);
+	int nResult;
+	while (m_pUSBSerialDevice && (nResult = m_pUSBSerialDevice->Read(Buffer, sizeof(Buffer))) > 0)
+		m_ExternalMIDIParser.ParseMIDIBytes(Buffer, static_cast<size_t>(nResult), true);
 
 	while ((nBytes = m_MIDIRxBuffer.Dequeue(Buffer, sizeof(Buffer))) > 0)
-		ParseMIDIBytes(Buffer, nBytes, true);
+		m_ExternalMIDIParser.ParseMIDIBytes(Buffer, nBytes, true);
 }
 
 size_t CMT32Pi::ReceiveSerialMIDI(u8* pOutData, size_t nSize)
@@ -1529,12 +1746,7 @@ void CMT32Pi::USBMIDIDeviceRemovedHandler(CDevice* pDevice, void* pContext)
 	void** pDevicePointer = reinterpret_cast<void**>(pContext);
 	*pDevicePointer = nullptr;
 
-	// Re-enable serial MIDI if not in-use by logger and no other MIDI devices available
-	if (s_pThis->m_bSerialMIDIAvailable && !(s_pThis->m_pUSBMIDIDevice || s_pThis->m_pUSBSerialDevice || s_pThis->m_pPisound))
-	{
-		LOGNOTE("Using serial MIDI interface");
-		s_pThis->m_bSerialMIDIEnabled = true;
-	}
+	LOGNOTE("USB MIDI device removed");
 }
 
 // The following handlers are called from interrupt context, enqueue into ring buffer for main thread

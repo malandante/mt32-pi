@@ -43,6 +43,19 @@ jobs:
         with:
           scandir: scripts
 
+  host-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Golem protocol vectors
+        run: python3 tests/test_golem_protocol.py
+
+      - name: USB MIDI encoder
+        run: |
+          g++ -std=c++17 -Wall -Wextra -Werror -Iinclude tests/test_usbmidiencoder.cpp -o test_usbmidiencoder
+          ./test_usbmidiencoder
+
   build:
     runs-on: ubuntu-latest
     name: build-${{ matrix.board }}

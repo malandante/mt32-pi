@@ -53,6 +53,7 @@ value completes successfully.
 | `01` | `SET_SYNTH` | `00` MT-32/Munt, `01` SoundFont/FluidSynth |
 | `02` | `SET_ROM_SET` | `00` MT-32 old, `01` MT-32 new, `02` CM-32L |
 | `03` | `SET_SOUNDFONT` | 14-bit index as `low7 high7`; currently 0–511 |
+| `04` | `SET_USB_OUT` | `00` off, `01` on, `02` bridge, `7F` report only |
 
 Example: select SoundFont 511 using transaction 18 (`0x12`):
 
@@ -75,6 +76,42 @@ returns `ERROR` instead. `GET_STATUS` returns `ACCEPTED` followed by `STATUS`.
 
 `READY` echoes the active value using the same payload representation as the
 request.
+
+## USB MIDI output
+
+`SET_USB_OUT` controls whether MIDI from the Next (and network MIDI) is also
+sent to every USB MIDI device attached to the Pi:
+
+| Mode | Built-in synth | USB MIDI devices |
+| --- | --- | --- |
+| `00` off | plays | receive nothing |
+| `01` on | plays | receive the same MIDI |
+| `02` bridge | silent | receive the MIDI |
+
+Forwarding includes channel messages, system common and real-time messages, and
+every SysEx except the mt32-pi and Golem control messages, which the Pi always
+consumes. Switching to off sends All Sound Off and All Notes Off on all 16
+channels to the USB devices; entering or leaving bridge silences the built-in
+synth.
+
+`READY` carries two bytes: the active mode and the number of attached USB MIDI
+devices (`00` if none). `7F` changes nothing and only reports, so a client can
+read the mode without `STATUS` growing. The boot-time mode comes from `usb_out`
+in `mt32-pi.cfg`.
+
+MIDI from USB devices (a keyboard, a USB-to-DIN interface's input) is parsed
+separately from the GPIO stream, always reaches the built-in synth, and is
+forwarded to USB devices only when `usb_in_thru = on`. Golem requests arriving
+over USB are ignored, because replies always go to the GPIO serial port.
+
+Example: switch to bridge using transaction 18 (`0x12`), and the replies with
+one device attached:
+
+```text
+F0 7D 47 4C 4D 01 12 04 02 F7
+F0 7D 47 4C 4D 01 12 40 04 F7
+F0 7D 47 4C 4D 01 12 41 04 02 01 F7
+```
 
 ## Error codes
 
@@ -103,6 +140,7 @@ Capabilities form a 14-bit bitmap:
 | 1 | Select synthesizer |
 | 2 | Select MT-32 ROM set |
 | 3 | Select SoundFont |
+| 4 | USB MIDI output (`SET_USB_OUT`) |
 
 Availability bit 0 means MT-32/Munt is available; bit 1 means
 SoundFont/FluidSynth is available. Synth and ROM use the values listed above.
