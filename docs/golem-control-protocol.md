@@ -104,6 +104,20 @@ separately from the GPIO stream, always reaches the built-in synth, and is
 forwarded to USB devices only when `usb_in_thru = on`. Golem requests arriving
 over USB are ignored, because replies always go to the GPIO serial port.
 
+Each byte stream has its own MIDI parser, so a message split across reads is
+never mixed with bytes from another source: GPIO serial, USB serial, and USB
+MIDI/Pisound. Known limits:
+
+- All USB MIDI devices share one parser, because Circle does not report which
+  device a packet came from. Short messages are safe (each USB packet carries
+  a whole message), but a SysEx from one device can be broken by another
+  device sending at the same moment.
+- Network MIDI (RTP-MIDI, UDP) shares the GPIO parser, as in upstream
+  mt32-pi. It only matters when the network is enabled in `mt32-pi.cfg`.
+- All sources play the same 16 channels: a keyboard on a channel the song
+  uses mixes with it, and the song's cleanup (All Notes Off) also stops the
+  keyboard's notes.
+
 Example: switch to bridge using transaction 18 (`0x12`), and the replies with
 one device attached:
 

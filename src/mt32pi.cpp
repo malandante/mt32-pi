@@ -169,6 +169,7 @@ CMT32Pi::CMT32Pi(CI2CMaster* pI2CMaster, CSPIMaster* pSPIMaster, CInterruptSyste
 	  m_pSoundFontSynth(nullptr),
 
 	  m_ExternalMIDIParser(this),
+	  m_USBSerialMIDIParser(this),
 	  m_USBOutMode(CConfig::TMIDIUSBOut::Off),
 	  m_nUSBTxDroppedReported(0)
 {
@@ -1395,13 +1396,15 @@ void CMT32Pi::UpdateMIDI()
 		bReceived = true;
 	}
 
-	// External MIDI: USB serial, then USB MIDI/Pisound ring buffer
+	// External MIDI: USB serial, then USB MIDI/Pisound ring buffer, each
+	// with its own parser so a message split across reads is never mixed
+	// with bytes from the other source
 	if (m_pUSBSerialDevice)
 	{
 		const int nResult = m_pUSBSerialDevice->Read(Buffer, sizeof(Buffer));
 		if (nResult > 0)
 		{
-			m_ExternalMIDIParser.ParseMIDIBytes(Buffer, static_cast<size_t>(nResult));
+			m_USBSerialMIDIParser.ParseMIDIBytes(Buffer, static_cast<size_t>(nResult));
 			bReceived = true;
 		}
 	}
@@ -1428,7 +1431,7 @@ void CMT32Pi::PurgeMIDIBuffers()
 
 	int nResult;
 	while (m_pUSBSerialDevice && (nResult = m_pUSBSerialDevice->Read(Buffer, sizeof(Buffer))) > 0)
-		m_ExternalMIDIParser.ParseMIDIBytes(Buffer, static_cast<size_t>(nResult), true);
+		m_USBSerialMIDIParser.ParseMIDIBytes(Buffer, static_cast<size_t>(nResult), true);
 
 	while ((nBytes = m_MIDIRxBuffer.Dequeue(Buffer, sizeof(Buffer))) > 0)
 		m_ExternalMIDIParser.ParseMIDIBytes(Buffer, nBytes, true);

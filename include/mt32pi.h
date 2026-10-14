@@ -251,7 +251,8 @@ private:
 
 	// MIDI receive buffer
 	CRingBuffer<u8, MIDIRxBufferSize> m_MIDIRxBuffer;
-	CExternalMIDIParser m_ExternalMIDIParser;
+	CExternalMIDIParser m_ExternalMIDIParser;   // USB MIDI devices and Pisound
+	CExternalMIDIParser m_USBSerialMIDIParser;  // USB serial: a byte stream of its own
 
 	// USB MIDI output
 	CConfig::TMIDIUSBOut m_USBOutMode;
