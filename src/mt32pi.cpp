@@ -28,6 +28,7 @@
 
 #include <cstdarg>
 
+#include "dither.h"
 #include "lcd/drivers/hd44780.h"
 #include "lcd/drivers/ssd1306.h"
 #include "lcd/ui.h"
@@ -627,6 +628,12 @@ void CMT32Pi::AudioTask()
 	float FloatBuffer[nQueueSizeFrames * nChannels];
 	s8 IntBuffer[nQueueSizeFrames * nBytesPerFrame + bI2S ? 0 : 1];
 
+	// I2S to the Next: dithered reduction to the bits it keeps (10)
+	const unsigned nDitherBits = bI2S ? static_cast<unsigned>(m_pConfig->AudioDitherBits) : 0;
+	CDither Dither(nDitherBits, m_pConfig->AudioSampleRate / 10);
+	if (Dither.GetBits())
+		LOGNOTE("I2S dither to %u bits", Dither.GetBits());
+
 	while (m_bRunning)
 	{
 		const size_t nFrames = nQueueSizeFrames - m_pSound->GetQueueFramesAvail();
@@ -634,7 +641,9 @@ void CMT32Pi::AudioTask()
 
 		m_pCurrentSynth->Render(FloatBuffer, nFrames);
 
-		if (bReversedStereo)
+		if (Dither.GetBits())
+			Dither.Convert(FloatBuffer, reinterpret_cast<int32_t*>(IntBuffer), nFrames, bReversedStereo);
+		else if (bReversedStereo)
 		{
 			// Convert to signed 24-bit integers with channel swap
 			for (size_t i = 0; i < nFrames * nChannels; i += nChannels)
