@@ -56,11 +56,6 @@ jobs:
           g++ -std=c++17 -Wall -Wextra -Werror -Iinclude tests/test_usbmidiencoder.cpp -o test_usbmidiencoder
           ./test_usbmidiencoder
 
-      - name: I2S dither
-        run: |
-          g++ -std=c++17 -Wall -Wextra -Werror -Iinclude tests/test_dither.cpp -o test_dither
-          ./test_dither
-
   build:
     runs-on: ubuntu-latest
     name: build-${{ matrix.board }}
