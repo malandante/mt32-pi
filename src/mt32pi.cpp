@@ -626,7 +626,9 @@ void CMT32Pi::AudioTask()
 
 	// Extra byte so that we can write to the 24-bit buffer with overlapping 32-bit writes (efficiency)
 	float FloatBuffer[nQueueSizeFrames * nChannels];
-	s8 IntBuffer[nQueueSizeFrames * nBytesPerFrame + bI2S ? 0 : 1];
+	// (was 'n + bI2S ? 0 : 1', which parses as '(n + bI2S) ? 0 : 1': a zero-length
+	// array, so the conversion wrote over FloatBuffer on the stack)
+	s8 IntBuffer[nQueueSizeFrames * nBytesPerFrame + (bI2S ? 0 : 1)];
 
 	// I2S to the Next: dithered reduction to the bits it keeps (10)
 	const unsigned nDitherBits = bI2S ? static_cast<unsigned>(m_pConfig->AudioDitherBits) : 0;
