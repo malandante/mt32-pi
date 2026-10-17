@@ -27,6 +27,7 @@
 #include <circle/sound/pwmsoundbasedevice.h>
 
 #include <cstdarg>
+#include <cstdio>
 
 #include "lcd/drivers/hd44780.h"
 #include "lcd/drivers/ssd1306.h"
@@ -72,6 +73,7 @@ enum class TGolemCommand : u8
 	SetSoundFont   = 0x03,
 	SetUSBOut      = 0x04,
 	SetParameter   = 0x05,
+	Save           = 0x06,
 };
 
 enum class TGolemResponse : u8
@@ -100,7 +102,15 @@ enum TGolemCapability : u16
 	GolemCapabilitySetSoundFont = 1 << 3,
 	GolemCapabilitySetUSBOut    = 1 << 4,
 	GolemCapabilitySetParameter = 1 << 5,
+	GolemCapabilitySave         = 1 << 6,
 };
+
+// SAVE payload
+constexpr u8 GolemSaveWrite = 0x00;	// write golem.cfg with the current settings
+constexpr u8 GolemSaveClear = 0x01;	// delete it: mt32-pi.cfg alone at the next start
+
+constexpr char GolemConfigPath[]     = "SD:golem.cfg";
+constexpr char GolemConfigTempPath[] = "SD:golem.tmp";
 
 // SET_PARAMETER: parameter numbers and the value that only reports
 enum class TGolemParameter : u8
@@ -361,6 +371,12 @@ bool CMT32Pi::Initialize(bool bSerialMIDIAvailable)
 			return false;
 		}
 	}
+
+	// [golem] settings from mt32-pi.cfg or golem.cfg (.golem save)
+	if (m_pConfig->GolemVolume != 100)
+		SetMasterVolume(m_pConfig->GolemVolume);
+	if (m_pConfig->GolemEffects >= 0 && m_pSoundFontSynth)
+		m_pSoundFontSynth->SetEffects(m_pConfig->GolemEffects != 0);
 
 	if (m_pPisound)
 		LOGNOTE("Using Pisound MIDI interface");
@@ -1240,10 +1256,121 @@ bool CMT32Pi::ParseGolemSysEx(const u8* pData, size_t nSize)
 			return true;
 		}
 
+		case TGolemCommand::Save:
+		{
+			// Payload: 0 = write golem.cfg, 1 = delete it. READY echoes it.
+			if (nSize != GolemHeaderSize + 2)
+			{
+				SendGolemError(nTransaction, nCommand, static_cast<u8>(TGolemError::MalformedRequest));
+				return true;
+			}
+
+			const u8 nAction = pData[8];
+			if (nAction != GolemSaveWrite && nAction != GolemSaveClear)
+			{
+				SendGolemError(nTransaction, nCommand, static_cast<u8>(TGolemError::InvalidParameter));
+				return true;
+			}
+
+			SendGolemResponse(nTransaction, static_cast<u8>(TGolemResponse::Accepted), nCommand);
+			const bool bResult = nAction == GolemSaveWrite ? SaveGolemSettings() : ClearGolemSettings();
+			if (bResult)
+				SendGolemResponse(nTransaction, static_cast<u8>(TGolemResponse::Ready), nCommand, &nAction, 1);
+			else
+				SendGolemError(nTransaction, nCommand, static_cast<u8>(TGolemError::OperationFailed));
+			return true;
+		}
+
 		default:
 			SendGolemError(nTransaction, nCommand, static_cast<u8>(TGolemError::UnknownCommand));
 			return true;
 	}
+}
+
+// golem.cfg: the settings the Golem protocol can change, in mt32-pi.cfg
+// syntax. Written to a temporary file first, so a failed write never leaves a
+// half-written golem.cfg behind.
+bool CMT32Pi::SaveGolemSettings()
+{
+	static const char* const USBOutNames[] = {"off", "on", "bridge"};
+	static const char* const ROMSetNames[] = {"old", "new", "cm32l"};
+
+	char Text[640];
+	int n = snprintf(Text, sizeof(Text),
+	                 "# golem.cfg: written by .golem save and read after mt32-pi.cfg,\n"
+	                 "# whose values it overrides. .golem save clear deletes it.\n"
+	                 "\n[system]\ndefault_synth = %s\n"
+	                 "\n[midi]\nusb_out = %s\nusb_in_thru = %s\n",
+	                 m_pCurrentSynth == m_pSoundFontSynth ? "soundfont" : "mt32",
+	                 USBOutNames[static_cast<u8>(m_USBOutMode)],
+	                 m_pConfig->MIDIUSBInThru ? "on" : "off");
+
+	if (m_pMT32Synth)
+	{
+		const u8 nROMSet = static_cast<u8>(m_pMT32Synth->GetROMSet());
+		n += snprintf(Text + n, sizeof(Text) - n,
+		              "\n[mt32emu]\n%s%s%smidi_channels = %s\n",
+		              nROMSet < 3 ? "rom_set = " : "",
+		              nROMSet < 3 ? ROMSetNames[nROMSet] : "",
+		              nROMSet < 3 ? "\n" : "",
+		              m_pMT32Synth->GetMIDIChannels() == CMT32Synth::TMIDIChannels::Alternate ? "alternate" : "standard");
+	}
+
+	if (m_pSoundFontSynth)
+		n += snprintf(Text + n, sizeof(Text) - n,
+		              "\n[fluidsynth]\nsoundfont = %u\n",
+		              static_cast<unsigned>(m_pSoundFontSynth->GetSoundFontIndex()));
+
+	n += snprintf(Text + n, sizeof(Text) - n, "\n[golem]\nvolume = %d\n", m_nMasterVolume);
+	if (m_pSoundFontSynth && m_pSoundFontSynth->HasEffectsSet())
+		n += snprintf(Text + n, sizeof(Text) - n, "effects = %d\n", m_pSoundFontSynth->GetEffects() ? 1 : 0);
+
+	if (n <= 0 || n >= static_cast<int>(sizeof(Text)))
+		return false;
+
+	FIL File;
+	UINT nWritten = 0;
+	if (f_open(&File, GolemConfigTempPath, FA_CREATE_ALWAYS | FA_WRITE) != FR_OK)
+	{
+		LOGERR("golem.cfg: cannot create %s", GolemConfigTempPath);
+		return false;
+	}
+	const FRESULT WriteResult = f_write(&File, Text, n, &nWritten);
+	const FRESULT CloseResult = f_close(&File);
+	if (WriteResult != FR_OK || CloseResult != FR_OK || nWritten != static_cast<UINT>(n))
+	{
+		LOGERR("golem.cfg: write failed");
+		f_unlink(GolemConfigTempPath);
+		return false;
+	}
+
+	// FatFs cannot rename over an existing file
+	const FRESULT UnlinkResult = f_unlink(GolemConfigPath);
+	if (UnlinkResult != FR_OK && UnlinkResult != FR_NO_FILE)
+		return false;
+	if (f_rename(GolemConfigTempPath, GolemConfigPath) != FR_OK)
+	{
+		LOGERR("golem.cfg: rename failed");
+		return false;
+	}
+
+	LOGNOTE("Settings saved to golem.cfg");
+	LCDLog(TLCDLogType::Notice, "Settings saved");
+	return true;
+}
+
+bool CMT32Pi::ClearGolemSettings()
+{
+	const FRESULT Result = f_unlink(GolemConfigPath);
+	if (Result != FR_OK && Result != FR_NO_FILE)
+	{
+		LOGERR("golem.cfg: cannot delete");
+		return false;
+	}
+
+	LOGNOTE("golem.cfg deleted");
+	LCDLog(TLCDLogType::Notice, "Saved settings cleared");
+	return true;
 }
 
 bool CMT32Pi::SendGolemResponse(u8 nTransaction, u8 nResponse, u8 nCommand, const u8* pPayload, size_t nPayloadSize)
@@ -1290,7 +1417,8 @@ void CMT32Pi::SendGolemStatus(u8 nTransaction)
 	                             GolemCapabilitySetROMSet |
 	                             GolemCapabilitySetSoundFont |
 	                             GolemCapabilitySetUSBOut |
-	                             GolemCapabilitySetParameter;
+	                             GolemCapabilitySetParameter |
+	                             GolemCapabilitySave;
 
 	u8 nAvailability = 0;
 	if (m_pMT32Synth)

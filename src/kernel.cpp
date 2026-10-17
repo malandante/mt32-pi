@@ -89,6 +89,11 @@ bool CKernel::Initialize(void)
 	if (!m_Config.Initialize("mt32-pi.cfg"))
 		m_Logger.Write(GetKernelName(), LogWarning, "Unable to find or parse config file; using defaults");
 
+	// Settings saved from the Next (.golem save) override mt32-pi.cfg
+	FILINFO GolemConfigInfo;
+	if (f_stat("SD:golem.cfg", &GolemConfigInfo) == FR_OK && !m_Config.Initialize("SD:golem.cfg"))
+		m_Logger.Write(GetKernelName(), LogWarning, "Unable to parse golem.cfg");
+
 	// Init serial port for MIDI with preferred baud rate if not used for logging
 	if (bSerialMIDIAvailable && !m_Serial.Initialize(m_Config.MIDIGPIOBaudRate))
 		return false;

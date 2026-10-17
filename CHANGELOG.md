@@ -23,6 +23,12 @@ Planned as golem-1.1.0.
   0-100 (what the buttons and the encoder change), 1 FluidSynth reverb and
   chorus on/off, 2 MT-32 MIDI channels standard/alternate, 3 USB input thru
   on/off. Set from the Next with `.golem set`. Settings last until power-off.
+- Golem command `SAVE` (0x06, capability bit 6): payload 0 writes `golem.cfg`
+  with the current engine, ROM set, SoundFont, MT-32 MIDI channels, USB
+  options, volume and effects; 1 deletes it. `golem.cfg` is read after
+  `mt32-pi.cfg` and overrides it. Written to `golem.tmp` and renamed, so a
+  failed write leaves the previous file. `.golem save [clear]` on the Next.
+- `[golem]` options `volume` (0-100) and `effects` (-1 keep, 0 off, 1 on).
 
 ### Changed
 

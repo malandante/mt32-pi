@@ -160,6 +160,8 @@ private:
 	bool SendGolemResponse(u8 nTransaction, u8 nResponse, u8 nCommand, const u8* pPayload = nullptr, size_t nPayloadSize = 0);
 	void SendGolemError(u8 nTransaction, u8 nCommand, u8 nError);
 	void SendGolemStatus(u8 nTransaction);
+	bool SaveGolemSettings();
+	bool ClearGolemSettings();
 
 	void ProcessEventQueue();
 	void ProcessButtonEvent(const TButtonEvent& Event);

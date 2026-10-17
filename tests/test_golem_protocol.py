@@ -11,6 +11,7 @@ SET_ROM_SET = 0x02
 SET_SOUNDFONT = 0x03
 SET_USB_OUT = 0x04
 SET_PARAMETER = 0x05
+SAVE = 0x06
 
 PARAM_VOLUME = 0x00
 PARAM_EFFECTS = 0x01
@@ -134,6 +135,21 @@ class GolemProtocolVectors(unittest.TestCase):
         self.assertEqual(
             response(0x12, STATUS, GET_STATUS, payload),
             bytes.fromhex("F0 7D 47 4C 4D 01 12 43 00 3F 00 03 01 02 7F 03 F7"),
+        )
+
+    def test_save_and_clear(self):
+        self.assertEqual(request(0x30, SAVE, (0x00,)), bytes.fromhex("F0 7D 47 4C 4D 01 30 06 00 F7"))
+        self.assertEqual(request(0x31, SAVE, (0x01,)), bytes.fromhex("F0 7D 47 4C 4D 01 31 06 01 F7"))
+        self.assertEqual(
+            response(0x30, READY, SAVE, (0x00,)),
+            bytes.fromhex("F0 7D 47 4C 4D 01 30 41 06 00 F7"),
+        )
+
+    def test_capabilities_with_save(self):
+        payload = (0x7F, 0x00, 0x03, 0x01, 0x02, 0x7F, 0x03)
+        self.assertEqual(
+            response(0x12, STATUS, GET_STATUS, payload),
+            bytes.fromhex("F0 7D 47 4C 4D 01 12 43 00 7F 00 03 01 02 7F 03 F7"),
         )
 
     def test_rejects_non_seven_bit_payload(self):
