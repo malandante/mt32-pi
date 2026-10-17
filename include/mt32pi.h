@@ -53,6 +53,7 @@
 #include "control/mister.h"
 #include "event.h"
 #include "lcd/ui.h"
+#include "loudness.h"
 #include "midiparser.h"
 #include "nextaudioinput.h"
 #include "net/applemidi.h"
@@ -247,6 +248,10 @@ private:
 	// Audio output
 	CSoundBaseDevice* m_pSound;
 	CNextAudioInput* m_pNextAudio;
+
+	// [golem] loudness: set by the main task, applied by the audio task
+	volatile bool m_bLoudness;
+	Loudness::CLimiter m_Limiter;
 
 	// Extra devices
 	CPisound* m_pPisound;

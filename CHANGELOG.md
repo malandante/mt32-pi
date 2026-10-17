@@ -45,6 +45,13 @@ Planned as golem-1.1.0.
   the sound does not depend on the banks used before. Button 1 cycles through the available engines; button 2 selects
   the next bank in OPL3 mode.
 
+- Loudness (`[golem] loudness`, `loudness_gain`; Golem `SET_PARAMETER` 6,
+  `.golem set loud`): the synth's output is raised by a fixed gain (2.0 by
+  default) through a stereo-linked look-ahead limiter (64 frames, release
+  200 ms, soft clip above 0.95), so the music is louder in the Next's mix
+  without clipping. `SAVE` writes it. Host test: exact gain below the
+  threshold, settles at -1 dB, catches sudden peaks, recovers, keeps the
+  stereo image.
 - Experimental `[audio] next_input` and `next_input_gain`: the Next sends the
   output of its mixer back to the Pi over I2S (PCM_DIN, GPIO 20, with NextReg
   `$A2` bit 4 set); the Pi receives it (Circle I2S in both directions, as clock

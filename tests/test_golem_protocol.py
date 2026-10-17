@@ -19,6 +19,7 @@ PARAM_MIDI_CHANNELS = 0x02
 PARAM_USB_IN_THRU = 0x03
 PARAM_KEYS_TO_NEXT = 0x04
 PARAM_OPL3_BANK = 0x05
+PARAM_LOUDNESS = 0x06
 
 SYNTH_OPL3 = 0x02
 
@@ -175,6 +176,12 @@ class GolemProtocolVectors(unittest.TestCase):
         self.assertEqual(
             response(0x41, READY, SET_PARAMETER, (PARAM_OPL3_BANK, 72)),
             bytes.fromhex("F0 7D 47 4C 4D 01 41 41 05 05 48 F7"),
+        )
+
+    def test_loudness(self):
+        self.assertEqual(
+            request(0x42, SET_PARAMETER, (PARAM_LOUDNESS, 1)),
+            bytes.fromhex("F0 7D 47 4C 4D 01 42 05 06 01 F7"),
         )
 
     def test_status_with_opl3(self):
