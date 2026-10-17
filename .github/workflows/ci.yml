@@ -56,6 +56,11 @@ jobs:
           g++ -std=c++17 -Wall -Wextra -Werror -Iinclude tests/test_usbmidiencoder.cpp -o test_usbmidiencoder
           ./test_usbmidiencoder
 
+      - name: Next audio input (I2S from the Next, ring buffer)
+        run: |
+          g++ -std=c++17 -Wall -Wextra -Werror -Iinclude tests/test_nextaudiomix.cpp -o test_nextaudiomix
+          ./test_nextaudiomix
+
       - name: OPL3 (libADLMIDI as the kernel builds it)
         run: |
           git submodule update --init --depth 1 external/libadlmidi
