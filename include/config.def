@@ -56,6 +56,7 @@ END_SECTION
 BEGIN_SECTION(golem)
 CFG(volume,			int,				GolemVolume,				100						)
 CFG(effects,			int,				GolemEffects,				-1						)
+CFG(keys,			bool,				GolemKeysToNext,			false						)
 END_SECTION
 
 BEGIN_SECTION(audio)

@@ -47,6 +47,7 @@
 #include <wlan/bcm4343.h>
 #include <wlan/hostap/wpa_supplicant/wpasupplicant.h>
 
+#include "midiserialdevice.h"
 #include "config.h"
 #include "control/control.h"
 #include "control/mister.h"
@@ -70,7 +71,7 @@
 class CMT32Pi : CMultiCoreSupport, CPower, CMIDIParser, CAppleMIDIHandler, CUDPMIDIHandler
 {
 public:
-	CMT32Pi(CI2CMaster* pI2CMaster, CSPIMaster* pSPIMaster, CInterruptSystem* pInterrupt, CGPIOManager* pGPIOManager, CSerialDevice* pSerialDevice, CUSBHCIDevice* pUSBHCI);
+	CMT32Pi(CI2CMaster* pI2CMaster, CSPIMaster* pSPIMaster, CInterruptSystem* pInterrupt, CGPIOManager* pGPIOManager, CMIDISerialDevice* pSerialDevice, CUSBHCIDevice* pUSBHCI);
 	virtual ~CMT32Pi() override;
 
 	bool Initialize(bool bSerialMIDIAvailable = true);
@@ -128,6 +129,7 @@ private:
 	void HandleShortMessage(u32 nMessage);
 	void QueueUSBShortMessage(u32 nMessage);
 	void QueueUSBSysEx(const u8* pData, size_t nSize);
+	void SendToHost(const u8* pData, size_t nSize);
 	void FlushUSBMIDI();
 	void SetUSBOutMode(CConfig::TMIDIUSBOut Mode);
 	size_t GetUSBMIDIDeviceCount() const;
@@ -187,7 +189,7 @@ private:
 	CSPIMaster* m_pSPIMaster;
 	CInterruptSystem* m_pInterrupt;
 	CGPIOManager* m_pGPIOManager;
-	CSerialDevice* m_pSerial;
+	CMIDISerialDevice* m_pSerial;
 	CUSBHCIDevice* m_pUSBHCI;
 	FATFS m_USBFileSystem;
 	bool m_bUSBAvailable;
@@ -258,6 +260,7 @@ private:
 
 	// USB MIDI output
 	CConfig::TMIDIUSBOut m_USBOutMode;
+	unsigned m_nKeysToNextDropped;
 	USBMIDI::CPacketQueue<USBTxQueueSize> m_USBTxQueue;
 	size_t m_nUSBTxDroppedReported;
 

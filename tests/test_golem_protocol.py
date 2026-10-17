@@ -17,6 +17,7 @@ PARAM_VOLUME = 0x00
 PARAM_EFFECTS = 0x01
 PARAM_MIDI_CHANNELS = 0x02
 PARAM_USB_IN_THRU = 0x03
+PARAM_KEYS_TO_NEXT = 0x04
 
 ACCEPTED = 0x40
 READY = 0x41
@@ -128,6 +129,12 @@ class GolemProtocolVectors(unittest.TestCase):
         self.assertEqual(
             request(0x22, SET_PARAMETER, (PARAM_MIDI_CHANNELS, 0x7F)),
             bytes.fromhex("F0 7D 47 4C 4D 01 22 05 02 7F F7"),
+        )
+
+    def test_keys_to_next(self):
+        self.assertEqual(
+            request(0x23, SET_PARAMETER, (PARAM_KEYS_TO_NEXT, 1)),
+            bytes.fromhex("F0 7D 47 4C 4D 01 23 05 04 01 F7"),
         )
 
     def test_capabilities_with_set_parameter(self):

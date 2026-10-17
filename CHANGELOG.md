@@ -28,7 +28,12 @@ Planned as golem-1.1.0.
   options, volume and effects; 1 deletes it. `golem.cfg` is read after
   `mt32-pi.cfg` and overrides it. Written to `golem.tmp` and renamed, so a
   failed write leaves the previous file. `.golem save [clear]` on the Next.
-- `[golem]` options `volume` (0-100) and `effects` (-1 keep, 0 off, 1 on).
+- `[golem]` options `volume` (0-100), `effects` (-1 keep, 0 off, 1 on) and
+  `keys`.
+- Keyboard to the Next (`[golem] keys`, `SET_PARAMETER` 4, `.golem set keys`):
+  MIDI from USB devices and the Pisound also goes out of the GPIO serial port
+  to the Next, as whole messages (dropped, never cut, if the transmit buffer
+  is full) between the Golem replies. Real-time bytes are not sent.
 
 ### Changed
 

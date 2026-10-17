@@ -119,6 +119,7 @@ enum class TGolemParameter : u8
 	Effects      = 0x01,	// 0/1, FluidSynth reverb and chorus
 	MIDIChannels = 0x02,	// 0 standard (2-10), 1 alternate (1-8, 10), MT-32
 	USBInThru    = 0x03,	// 0/1, USB MIDI input also to USB MIDI devices
+	KeysToNext   = 0x04,	// 0/1, USB MIDI input also to the Next (GPIO serial)
 };
 constexpr u8 GolemParameterQuery = 0x7F;
 
@@ -127,7 +128,7 @@ constexpr u8 GolemUSBOutQuery = 0x7F;
 
 CMT32Pi* CMT32Pi::s_pThis = nullptr;
 
-CMT32Pi::CMT32Pi(CI2CMaster* pI2CMaster, CSPIMaster* pSPIMaster, CInterruptSystem* pInterrupt, CGPIOManager* pGPIOManager, CSerialDevice* pSerialDevice, CUSBHCIDevice* pUSBHCI)
+CMT32Pi::CMT32Pi(CI2CMaster* pI2CMaster, CSPIMaster* pSPIMaster, CInterruptSystem* pInterrupt, CGPIOManager* pGPIOManager, CMIDISerialDevice* pSerialDevice, CUSBHCIDevice* pUSBHCI)
 	: CMultiCoreSupport(CMemorySystem::Get()),
 	  CMIDIParser(),
 
@@ -193,6 +194,7 @@ CMT32Pi::CMT32Pi(CI2CMaster* pI2CMaster, CSPIMaster* pSPIMaster, CInterruptSyste
 	  m_ExternalMIDIParser(this),
 	  m_USBSerialMIDIParser(this),
 	  m_USBOutMode(CConfig::TMIDIUSBOut::Off),
+	  m_nKeysToNextDropped(0),
 	  m_nUSBTxDroppedReported(0)
 {
 	s_pThis = this;
@@ -778,6 +780,20 @@ void CMT32Pi::OnExternalShortMessage(u32 nMessage)
 	if (m_pConfig->MIDIUSBInThru)
 		QueueUSBShortMessage(nMessage);
 
+	// Keyboard to the Next: channel messages and system common, whole; no
+	// real-time bytes (clock, active sensing), which would only flood the port
+	const u8 nStatus = nMessage & 0xFF;
+	if (m_pConfig->GolemKeysToNext && nStatus < 0xF8)
+	{
+		const u8 Message[] = {nStatus, static_cast<u8>((nMessage >> 8) & 0x7F), static_cast<u8>((nMessage >> 16) & 0x7F)};
+		size_t nLength = 3;
+		if ((nStatus >= 0xC0 && nStatus < 0xE0) || nStatus == 0xF1 || nStatus == 0xF3)
+			nLength = 2;
+		else if (nStatus >= 0xF4)
+			nLength = 1;
+		SendToHost(Message, nLength);
+	}
+
 	HandleShortMessage(nMessage);
 }
 
@@ -797,6 +813,9 @@ void CMT32Pi::OnExternalSysExMessage(const u8* pData, size_t nSize)
 	{
 		if (m_pConfig->MIDIUSBInThru)
 			QueueUSBSysEx(pData, nSize);
+
+		if (m_pConfig->GolemKeysToNext)
+			SendToHost(pData, nSize);
 
 		m_pCurrentSynth->HandleMIDISysExMessage(pData, nSize);
 	}
@@ -840,6 +859,25 @@ void CMT32Pi::QueueUSBSysEx(const u8* pData, size_t nSize)
 	const size_t nEncoded = USBMIDI::EncodeSysEx(pData, nSize, 0, Packets);
 	if (nEncoded)
 		m_USBTxQueue.Push(Packets, nEncoded);
+}
+
+// A whole message to the Next on the GPIO serial port, or nothing: a message
+// cut by a full transmit buffer would corrupt the Next's MIDI stream and the
+// Golem replies that share it. Runs in the main task, like the replies, so the
+// two never interleave.
+void CMT32Pi::SendToHost(const u8* pData, size_t nSize)
+{
+	if (!m_bSerialMIDIEnabled || m_pSerial == nullptr)
+		return;
+
+	if (m_pSerial->GetFreeWriteSpace() < nSize)
+	{
+		if (m_nKeysToNextDropped++ == 0)
+			LOGWARN("Keys to Next: serial port busy, message dropped");
+		return;
+	}
+
+	m_pSerial->Write(pData, nSize);
 }
 
 size_t CMT32Pi::GetUSBMIDIDeviceCount() const
@@ -1193,7 +1231,8 @@ bool CMT32Pi::ParseGolemSysEx(const u8* pData, size_t nSize)
 				case TGolemParameter::Volume:       nMax = 100; break;
 				case TGolemParameter::Effects:
 				case TGolemParameter::MIDIChannels:
-				case TGolemParameter::USBInThru:    nMax = 1;   break;
+				case TGolemParameter::USBInThru:
+				case TGolemParameter::KeysToNext:   nMax = 1;   break;
 				default:
 					SendGolemError(nTransaction, nCommand, static_cast<u8>(TGolemError::InvalidParameter));
 					return true;
@@ -1248,6 +1287,15 @@ bool CMT32Pi::ParseGolemSysEx(const u8* pData, size_t nSize)
 						LCDLog(TLCDLogType::Notice, "USB in thru: %s", nValue ? "on" : "off");
 					}
 					nCurrent = m_pConfig->MIDIUSBInThru;
+					break;
+
+				case TGolemParameter::KeysToNext:
+					if (!bQuery)
+					{
+						m_pConfig->GolemKeysToNext = nValue;
+						LCDLog(TLCDLogType::Notice, "Keys to Next: %s", nValue ? "on" : "off");
+					}
+					nCurrent = m_pConfig->GolemKeysToNext;
 					break;
 			}
 
@@ -1321,7 +1369,8 @@ bool CMT32Pi::SaveGolemSettings()
 		              "\n[fluidsynth]\nsoundfont = %u\n",
 		              static_cast<unsigned>(m_pSoundFontSynth->GetSoundFontIndex()));
 
-	n += snprintf(Text + n, sizeof(Text) - n, "\n[golem]\nvolume = %d\n", m_nMasterVolume);
+	n += snprintf(Text + n, sizeof(Text) - n, "\n[golem]\nvolume = %d\nkeys = %s\n", m_nMasterVolume,
+	              m_pConfig->GolemKeysToNext ? "on" : "off");
 	if (m_pSoundFontSynth && m_pSoundFontSynth->HasEffectsSet())
 		n += snprintf(Text + n, sizeof(Text) - n, "effects = %d\n", m_pSoundFontSynth->GetEffects() ? 1 : 0);
 
