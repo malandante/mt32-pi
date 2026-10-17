@@ -57,6 +57,8 @@ BEGIN_SECTION(golem)
 CFG(volume,			int,				GolemVolume,				100						)
 CFG(effects,			int,				GolemEffects,				-1						)
 CFG(keys,			bool,				GolemKeysToNext,			false						)
+CFG(loudness,			bool,				GolemLoudness,				false						)
+CFG(loudness_gain,		float,				GolemLoudnessGain,			2.0f						)
 END_SECTION
 
 BEGIN_SECTION(audio)

@@ -120,7 +120,8 @@ enum class TGolemParameter : u8
 	MIDIChannels = 0x02,	// 0 standard (2-10), 1 alternate (1-8, 10), MT-32
 	USBInThru    = 0x03,	// 0/1, USB MIDI input also to USB MIDI devices
 	KeysToNext   = 0x04,	// 0/1, USB MIDI input also to the Next (GPIO serial)
-	OPL3Bank     = 0x05,	// 0-78, libADLMIDI embedded bank
+	OPL3Bank     = 0x05,	// 0-127, OPL3 bank: embedded, then SD:opl3/*.wopl
+	Loudness     = 0x06,	// 0/1, synth level raised with a limiter
 };
 constexpr u8 GolemParameterQuery = 0x7F;
 
@@ -187,6 +188,7 @@ CMT32Pi::CMT32Pi(CI2CMaster* pI2CMaster, CSPIMaster* pSPIMaster, CInterruptSyste
 	  m_pSound(nullptr),
 
 	  m_pNextAudio(nullptr),
+	  m_bLoudness(false),
 	  m_pPisound(nullptr),
 
 	  m_nMasterVolume(100),
@@ -403,6 +405,7 @@ bool CMT32Pi::Initialize(bool bSerialMIDIAvailable)
 		SetMasterVolume(m_pConfig->GolemVolume);
 	if (m_pConfig->GolemEffects >= 0 && m_pSoundFontSynth)
 		m_pSoundFontSynth->SetEffects(m_pConfig->GolemEffects != 0);
+	m_bLoudness = m_pConfig->GolemLoudness;
 
 	if (m_pPisound)
 		LOGNOTE("Using Pisound MIDI interface");
@@ -713,6 +716,7 @@ void CMT32Pi::AudioTask()
 
 	const size_t nQueueSizeFrames = m_pSound->GetQueueSizeFrames();
 	const float nNextInputGain = m_pConfig->AudioNextInputGain;
+	bool bLimiting = false;
 
 	// Extra byte so that we can write to the 24-bit buffer with overlapping 32-bit writes (efficiency)
 	float FloatBuffer[nQueueSizeFrames * nChannels];
@@ -726,6 +730,21 @@ void CMT32Pi::AudioTask()
 		const size_t nWriteBytes = nFrames * nBytesPerFrame;
 
 		m_pCurrentSynth->Render(FloatBuffer, nFrames);
+
+		// Loudness: a fresh limiter each time it is switched on, so no old
+		// audio is left in its look-ahead
+		if (m_bLoudness)
+		{
+			if (!bLimiting)
+			{
+				m_Limiter = Loudness::CLimiter();
+				m_Limiter.Configure(m_pConfig->AudioSampleRate, m_pConfig->GolemLoudnessGain);
+				bLimiting = true;
+			}
+			m_Limiter.Process(FloatBuffer, nFrames);
+		}
+		else
+			bLimiting = false;
 
 		if (m_pNextAudio)
 			m_pNextAudio->MixInto(FloatBuffer, nFrames, nNextInputGain);
@@ -1300,7 +1319,8 @@ bool CMT32Pi::ParseGolemSysEx(const u8* pData, size_t nSize)
 				case TGolemParameter::Effects:
 				case TGolemParameter::MIDIChannels:
 				case TGolemParameter::USBInThru:
-				case TGolemParameter::KeysToNext:   nMax = 1;   break;
+				case TGolemParameter::KeysToNext:
+				case TGolemParameter::Loudness:     nMax = 1;   break;
 				case TGolemParameter::OPL3Bank:     nMax = static_cast<u8>(m_pOPL3Synth ? m_pOPL3Synth->GetBankCount() - 1 : 127); break;
 				default:
 					SendGolemError(nTransaction, nCommand, static_cast<u8>(TGolemError::InvalidParameter));
@@ -1368,6 +1388,15 @@ bool CMT32Pi::ParseGolemSysEx(const u8* pData, size_t nSize)
 					nCurrent = m_pConfig->GolemKeysToNext;
 					break;
 
+				case TGolemParameter::Loudness:
+					if (!bQuery)
+					{
+						m_bLoudness = nValue;
+						LCDLog(TLCDLogType::Notice, "Loudness: %s", nValue ? "on" : "off");
+					}
+					nCurrent = m_bLoudness;
+					break;
+
 				case TGolemParameter::OPL3Bank:
 					if (!bQuery && m_pOPL3Synth->SetBank(nValue))
 						LCDLog(TLCDLogType::Notice, "OPL3 bank %d", nValue);
@@ -1419,7 +1448,7 @@ bool CMT32Pi::SaveGolemSettings()
 	static const char* const USBOutNames[] = {"off", "on", "bridge"};
 	static const char* const ROMSetNames[] = {"old", "new", "cm32l"};
 
-	char Text[640];
+	char Text[768];
 	int n = snprintf(Text, sizeof(Text),
 	                 "# golem.cfg: written by .golem save and read after mt32-pi.cfg,\n"
 	                 "# whose values it overrides. .golem save clear deletes it.\n"
@@ -1450,8 +1479,8 @@ bool CMT32Pi::SaveGolemSettings()
 	if (m_pOPL3Synth)
 		n += snprintf(Text + n, sizeof(Text) - n, "\n[opl3]\nbank = %d\n", m_pOPL3Synth->GetBank());
 
-	n += snprintf(Text + n, sizeof(Text) - n, "\n[golem]\nvolume = %d\nkeys = %s\n", m_nMasterVolume,
-	              m_pConfig->GolemKeysToNext ? "on" : "off");
+	n += snprintf(Text + n, sizeof(Text) - n, "\n[golem]\nvolume = %d\nkeys = %s\nloudness = %s\n", m_nMasterVolume,
+	              m_pConfig->GolemKeysToNext ? "on" : "off", m_bLoudness ? "on" : "off");
 	if (m_pSoundFontSynth && m_pSoundFontSynth->HasEffectsSet())
 		n += snprintf(Text + n, sizeof(Text) - n, "effects = %d\n", m_pSoundFontSynth->GetEffects() ? 1 : 0);
 
