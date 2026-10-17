@@ -9,6 +9,7 @@ GET_STATUS = 0x00
 SET_SYNTH = 0x01
 SET_ROM_SET = 0x02
 SET_SOUNDFONT = 0x03
+SET_USB_OUT = 0x04
 
 ACCEPTED = 0x40
 READY = 0x41
@@ -73,6 +74,33 @@ class GolemProtocolVectors(unittest.TestCase):
         self.assertEqual(
             response(0x12, STATUS, GET_STATUS, payload),
             bytes.fromhex("F0 7D 47 4C 4D 01 12 43 00 0F 00 03 01 02 7F 03 F7"),
+        )
+
+    def test_usb_out_bridge_exchange(self):
+        self.assertEqual(
+            request(0x12, SET_USB_OUT, (0x02,)),
+            bytes.fromhex("F0 7D 47 4C 4D 01 12 04 02 F7"),
+        )
+        self.assertEqual(
+            response(0x12, ACCEPTED, SET_USB_OUT),
+            bytes.fromhex("F0 7D 47 4C 4D 01 12 40 04 F7"),
+        )
+        self.assertEqual(
+            response(0x12, READY, SET_USB_OUT, (0x02, 0x01)),
+            bytes.fromhex("F0 7D 47 4C 4D 01 12 41 04 02 01 F7"),
+        )
+
+    def test_usb_out_query(self):
+        self.assertEqual(
+            request(0x13, SET_USB_OUT, (0x7F,)),
+            bytes.fromhex("F0 7D 47 4C 4D 01 13 04 7F F7"),
+        )
+
+    def test_capabilities_with_usb_out(self):
+        payload = (0x1F, 0x00, 0x03, 0x01, 0x02, 0x7F, 0x03)
+        self.assertEqual(
+            response(0x12, STATUS, GET_STATUS, payload),
+            bytes.fromhex("F0 7D 47 4C 4D 01 12 43 00 1F 00 03 01 02 7F 03 F7"),
         )
 
     def test_rejects_non_seven_bit_payload(self):

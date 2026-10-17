@@ -63,6 +63,7 @@
 #include "synth/mt32synth.h"
 #include "synth/soundfontsynth.h"
 #include "synth/synth.h"
+#include "usbmidiencoder.h"
 
 //#define MONITOR_TEMPERATURE
 
@@ -87,6 +88,25 @@ private:
 	};
 
 	static constexpr size_t MIDIRxBufferSize = 2048;
+	static constexpr size_t MaxUSBMIDIDevices = 4;
+	static constexpr size_t USBTxQueueSize = 4096;
+
+	// Parser for MIDI arriving from USB devices or the Pisound (e.g. a
+	// keyboard). Kept separate from the GPIO/network parser so the two byte
+	// streams never interleave, and so Golem control messages are only
+	// accepted from the host (the Next) that receives the replies.
+	class CExternalMIDIParser : public CMIDIParser
+	{
+	public:
+		CExternalMIDIParser(CMT32Pi* pOwner) : m_pOwner(pOwner) {}
+
+	protected:
+		virtual void OnShortMessage(u32 nMessage) override { m_pOwner->OnExternalShortMessage(nMessage); }
+		virtual void OnSysExMessage(const u8* pData, size_t nSize) override { m_pOwner->OnExternalSysExMessage(pData, nSize); }
+
+	private:
+		CMT32Pi* m_pOwner;
+	};
 
 	// CPower
 	virtual void OnEnterPowerSavingMode() override;
@@ -99,6 +119,18 @@ private:
 	virtual void OnSysExMessage(const u8* pData, size_t nSize) override;
 	virtual void OnUnexpectedStatus() override;
 	virtual void OnSysExOverflow() override;
+
+	// MIDI from the external parser
+	void OnExternalShortMessage(u32 nMessage);
+	void OnExternalSysExMessage(const u8* pData, size_t nSize);
+
+	// Shared MIDI handling and USB MIDI output
+	void HandleShortMessage(u32 nMessage);
+	void QueueUSBShortMessage(u32 nMessage);
+	void QueueUSBSysEx(const u8* pData, size_t nSize);
+	void FlushUSBMIDI();
+	void SetUSBOutMode(CConfig::TMIDIUSBOut Mode);
+	size_t GetUSBMIDIDeviceCount() const;
 
 	// CAppleMIDIHandler
 	virtual void OnAppleMIDIDataReceived(const u8* pData, size_t nSize) override { ParseMIDIBytes(pData, nSize); };
@@ -193,7 +225,7 @@ private:
 	bool m_bSerialMIDIEnabled;
 
 	// USB devices
-	CUSBMIDIDevice* m_pUSBMIDIDevice;
+	CUSBMIDIDevice* m_pUSBMIDIDevices[MaxUSBMIDIDevices];
 	CUSBSerialDevice* m_pUSBSerialDevice;
 	CUSBBulkOnlyMassStorageDevice* volatile m_pUSBMassStorageDevice;
 
@@ -219,6 +251,13 @@ private:
 
 	// MIDI receive buffer
 	CRingBuffer<u8, MIDIRxBufferSize> m_MIDIRxBuffer;
+	CExternalMIDIParser m_ExternalMIDIParser;   // USB MIDI devices and Pisound
+	CExternalMIDIParser m_USBSerialMIDIParser;  // USB serial: a byte stream of its own
+
+	// USB MIDI output
+	CConfig::TMIDIUSBOut m_USBOutMode;
+	USBMIDI::CPacketQueue<USBTxQueueSize> m_USBTxQueue;
+	size_t m_nUSBTxDroppedReported;
 
 	// Event handling
 	TEventQueue m_EventQueue;
