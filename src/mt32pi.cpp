@@ -665,7 +665,7 @@ void CMT32Pi::UITask()
 		}
 
 		// Experimental Next audio input: its counters every 10 seconds
-		if (m_pNextAudio && (nTicks - nNextAudioLogTime) >= Utility::MillisToTicks(10000))
+		if (m_pNextAudio && (nTicks - nNextAudioLogTime) >= Utility::MillisToTicks(10000u))
 		{
 			m_pNextAudio->LogStatus();
 			nNextAudioLogTime = nTicks;
