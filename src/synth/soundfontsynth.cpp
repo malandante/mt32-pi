@@ -137,6 +137,8 @@ CSoundFontSynth::CSoundFontSynth(unsigned nSampleRate)
 
 	  m_nVolume(100),
 	  m_nInitialGain(0.2f),
+	  m_bEffects(true),
+	  m_bEffectsSet(false),
 
 	  m_nPercussionMask(1 << 9),
 	  m_nCurrentSoundFontIndex(0)
@@ -305,6 +307,16 @@ void CSoundFontSynth::SetMasterVolume(u8 nVolume)
 	m_Lock.Release();
 }
 
+void CSoundFontSynth::SetEffects(bool bEnabled)
+{
+	m_bEffects    = bEnabled;
+	m_bEffectsSet = true;
+	m_Lock.Acquire();
+	fluid_synth_reverb_on(m_pSynth, -1, bEnabled);
+	fluid_synth_chorus_on(m_pSynth, -1, bEnabled);
+	m_Lock.Release();
+}
+
 size_t CSoundFontSynth::Render(float* pOutBuffer, size_t nFrames)
 {
 	m_Lock.Acquire();
@@ -412,6 +424,15 @@ bool CSoundFontSynth::Reinitialize(const char* pSoundFontPath, const TFXProfile*
 	fluid_synth_set_chorus_group_level(m_pSynth, -1, pFXProfile->nChorusLevel.ValueOr(pConfig->FluidSynthDefaultChorusLevel));
 	fluid_synth_set_chorus_group_nr(m_pSynth, -1, pFXProfile->nChorusVoices.ValueOr(pConfig->FluidSynthDefaultChorusVoices));
 	fluid_synth_set_chorus_group_speed(m_pSynth, -1, pFXProfile->nChorusSpeed.ValueOr(pConfig->FluidSynthDefaultChorusSpeed));
+
+	if (m_bEffectsSet)
+	{
+		fluid_synth_reverb_on(m_pSynth, -1, m_bEffects);
+		fluid_synth_chorus_on(m_pSynth, -1, m_bEffects);
+	}
+	else
+		m_bEffects = pFXProfile->bReverbActive.ValueOr(pConfig->FluidSynthDefaultReverbActive) ||
+		             pFXProfile->bChorusActive.ValueOr(pConfig->FluidSynthDefaultChorusActive);
 
 #ifndef NDEBUG
 	DumpFXSettings();

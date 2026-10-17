@@ -18,6 +18,11 @@ Planned as golem-1.1.0.
   device count.
 - `[midi] usb_in_thru`: MIDI from USB devices (a keyboard) is also forwarded to
   the USB outputs.
+- Golem command `SET_PARAMETER` (0x05, capability bit 5): payload parameter and
+  value, 0x7F only reports; `READY` carries both. Parameters: 0 master volume
+  0-100 (what the buttons and the encoder change), 1 FluidSynth reverb and
+  chorus on/off, 2 MT-32 MIDI channels standard/alternate, 3 USB input thru
+  on/off. Set from the Next with `.golem set`. Settings last until power-off.
 
 ### Changed
 
@@ -29,6 +34,10 @@ Planned as golem-1.1.0.
 
 ### Fixed
 
+- MT-32 MIDI channel assignment and master volume survive an MT-32 reset
+  SysEx and a ROM set change. Before, `midi_channels = alternate` and the
+  volume set with the buttons or encoder went back to the factory values as
+  soon as a game or player sent the reset.
 - The audio task converted each chunk into a zero-length array
   (`n + bI2S ? 0 : 1` parses as `(n + bI2S) ? 0 : 1`), writing over its
   float buffer on the stack. Present upstream since 2022.

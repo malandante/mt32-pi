@@ -64,7 +64,11 @@ public:
 	virtual void ReportStatus() const override;
 	virtual void UpdateLCD(CLCD& LCD, unsigned int nTicks) override;
 
+	// Channel assignment and master volume are kept here and written again
+	// after an MT-32 reset or a ROM set change, so a host's reset SysEx does
+	// not undo a setting made from the config file or the Golem protocol.
 	void SetMIDIChannels(TMIDIChannels Channels);
+	TMIDIChannels GetMIDIChannels() const { return m_MIDIChannels; }
 	void SetReversedStereo(bool bEnabled) { m_pSynth->setReversedStereoEnabled(bEnabled); }
 	bool SwitchROMSet(TMT32ROMSet ROMSet);
 	bool NextROMSet();
@@ -81,6 +85,10 @@ private:
 	static constexpr size_t LCDTextBufferSize = 20 + 1;
 
 	void GetPartLevels(unsigned int nTicks, float PartLevels[9], float PartPeaks[9]);
+	void ApplyKeptSettings();
+	void QueueKeptSettings();
+	void QueueRolandWrite(const u8* pAddressAndData, size_t nSize);
+	static bool IsResetSysEx(const u8* pData, size_t nSize);
 
 	// MT32Emu::ReportHandler
 	virtual bool onMIDIQueueOverflow() override;
@@ -97,6 +105,8 @@ private:
 	float m_nReverbGain;
 
 	TResamplerQuality m_ResamplerQuality;
+	TMIDIChannels m_MIDIChannels;
+	u8 m_nMasterVolume;
 	MT32Emu::SampleRateConverter* m_pSampleRateConverter;
 
 	CROMManager m_ROMManager;
