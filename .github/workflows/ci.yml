@@ -124,7 +124,14 @@ jobs:
         done
 
     - name: Build
-      run: make -j BOARD=${{ matrix.board }}
+      shell: bash
+      run: |
+        set +e
+        make -j BOARD=${{ matrix.board }} 2>&1 | tee build.log
+        status=${PIPESTATUS[0]}
+        # Compiler errors as annotations, readable without the job log
+        grep -E "error|Error [0-9]" build.log | head -20 | sed 's/^/::error::/'
+        exit $status
 
     - name: Upload built kernel
       uses: actions/upload-artifact@v4
