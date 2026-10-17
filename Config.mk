@@ -96,3 +96,7 @@ FLUIDSYNTHBUILDDIR=build-fluidsynth
 FLUIDSYNTHLIB=$(FLUIDSYNTHBUILDDIR)/src/libfluidsynth.a
 
 INIHHOME=$(realpath external/inih)
+
+ADLMIDIHOME=$(realpath external/libadlmidi)
+ADLMIDIBUILDDIR=build-adlmidi
+ADLMIDILIB=$(ADLMIDIBUILDDIR)/libADLMIDI.a

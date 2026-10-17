@@ -50,7 +50,7 @@ value completes successfully.
 | Value | Command | Payload |
 | --- | --- | --- |
 | `00` | `GET_STATUS` | none |
-| `01` | `SET_SYNTH` | `00` MT-32/Munt, `01` SoundFont/FluidSynth |
+| `01` | `SET_SYNTH` | `00` MT-32/Munt, `01` SoundFont/FluidSynth, `02` OPL3/libADLMIDI |
 | `02` | `SET_ROM_SET` | `00` MT-32 old, `01` MT-32 new, `02` CM-32L |
 | `03` | `SET_SOUNDFONT` | 14-bit index as `low7 high7`; currently 0–511 |
 | `04` | `SET_USB_OUT` | `00` off, `01` on, `02` bridge, `7F` report only |
@@ -157,7 +157,7 @@ Capabilities form a 14-bit bitmap:
 | 4 | USB MIDI output (`SET_USB_OUT`) |
 
 Availability bit 0 means MT-32/Munt is available; bit 1 means
-SoundFont/FluidSynth is available. Synth and ROM use the values listed above.
+SoundFont/FluidSynth is available; bit 2 means OPL3/libADLMIDI is available. Synth and ROM use the values listed above.
 The SoundFont index is a 14-bit `low7 high7` value. Unavailable or unknown state
 is represented by `7F` for synth/ROM and `7F 7F` for SoundFont.
 

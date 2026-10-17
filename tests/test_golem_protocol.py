@@ -18,6 +18,9 @@ PARAM_EFFECTS = 0x01
 PARAM_MIDI_CHANNELS = 0x02
 PARAM_USB_IN_THRU = 0x03
 PARAM_KEYS_TO_NEXT = 0x04
+PARAM_OPL3_BANK = 0x05
+
+SYNTH_OPL3 = 0x02
 
 ACCEPTED = 0x40
 READY = 0x41
@@ -157,6 +160,29 @@ class GolemProtocolVectors(unittest.TestCase):
         self.assertEqual(
             response(0x12, STATUS, GET_STATUS, payload),
             bytes.fromhex("F0 7D 47 4C 4D 01 12 43 00 7F 00 03 01 02 7F 03 F7"),
+        )
+
+    def test_opl3_engine_and_bank(self):
+        self.assertEqual(request(0x40, SET_SYNTH, (SYNTH_OPL3,)), bytes.fromhex("F0 7D 47 4C 4D 01 40 01 02 F7"))
+        self.assertEqual(
+            response(0x40, READY, SET_SYNTH, (SYNTH_OPL3,)),
+            bytes.fromhex("F0 7D 47 4C 4D 01 40 41 01 02 F7"),
+        )
+        self.assertEqual(
+            request(0x41, SET_PARAMETER, (PARAM_OPL3_BANK, 72)),
+            bytes.fromhex("F0 7D 47 4C 4D 01 41 05 05 48 F7"),
+        )
+        self.assertEqual(
+            response(0x41, READY, SET_PARAMETER, (PARAM_OPL3_BANK, 72)),
+            bytes.fromhex("F0 7D 47 4C 4D 01 41 41 05 05 48 F7"),
+        )
+
+    def test_status_with_opl3(self):
+        # all three engines available (bit 2 = OPL3), OPL3 active
+        payload = (0x7F, 0x00, 0x07, SYNTH_OPL3, 0x02, 0x7F, 0x03)
+        self.assertEqual(
+            response(0x12, STATUS, GET_STATUS, payload),
+            bytes.fromhex("F0 7D 47 4C 4D 01 12 43 00 7F 00 07 02 02 7F 03 F7"),
         )
 
     def test_rejects_non_seven_bit_payload(self):

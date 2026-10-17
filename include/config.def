@@ -99,6 +99,15 @@ CFG(chorus_voices,		int,				FluidSynthDefaultChorusVoices,		3						)
 CFG(chorus_speed,		float,				FluidSynthDefaultChorusSpeed,		0.3						)
 END_SECTION
 
+// OPL3 FM synthesis (libADLMIDI): embedded bank 0-78, emulator, number of
+// emulated chips (18 two-operator voices each) and output gain
+BEGIN_SECTION(opl3)
+CFG(bank,			int,				OPL3Bank,				72						)
+CFG(emulator,			TOPL3Emulator,			OPL3Emulator,				TOPL3Emulator::Nuked				)
+CFG(chips,			int,				OPL3Chips,				1						)
+CFG(gain,			float,				OPL3Gain,				2.5f						)
+END_SECTION
+
 BEGIN_SECTION(lcd)
 CFG(type,			TLCDType,			LCDType,				TLCDType::None					)
 CFG(width,			int,				LCDWidth,				20						)

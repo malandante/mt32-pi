@@ -34,6 +34,16 @@ Planned as golem-1.1.0.
   MIDI from USB devices and the Pisound also goes out of the GPIO serial port
   to the Next, as whole messages (dropped, never cut, if the transmit buffer
   is full) between the Golem replies. Real-time bytes are not sent.
+- OPL3 FM synthesis, a third engine next to MT-32 and FluidSynth: libADLMIDI
+  (GPL-3.0/LGPL-2.1, pinned at v1.6.2.1) with the Nuked and DOSBox emulators and
+  its 79 embedded General MIDI banks, built without the grey-zone ones.
+  `default_synth = opl3`; `[opl3]` options `bank`, `emulator`, `chips` and
+  `gain`. Golem `SET_SYNTH` 2 (`.golem engine opl3`), status availability
+  bit 2, `SET_PARAMETER` 5 for the bank (`.golem set bank`), and `SAVE` writes
+  the bank. WOPL bank files in `SD:opl3/` follow the embedded banks (79
+  onwards, alphabetical, up to 127). Each bank change builds a new player, so
+  the sound does not depend on the banks used before. Button 1 cycles through the available engines; button 2 selects
+  the next bank in OPL3 mode.
 
 ### Changed
 
