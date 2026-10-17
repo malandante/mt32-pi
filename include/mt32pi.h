@@ -128,6 +128,7 @@ private:
 	void HandleShortMessage(u32 nMessage);
 	void QueueUSBShortMessage(u32 nMessage);
 	void QueueUSBSysEx(const u8* pData, size_t nSize);
+	void SendToHost(const u8* pData, size_t nSize);
 	void FlushUSBMIDI();
 	void SetUSBOutMode(CConfig::TMIDIUSBOut Mode);
 	size_t GetUSBMIDIDeviceCount() const;
@@ -258,6 +259,7 @@ private:
 
 	// USB MIDI output
 	CConfig::TMIDIUSBOut m_USBOutMode;
+	unsigned m_nKeysToNextDropped;
 	USBMIDI::CPacketQueue<USBTxQueueSize> m_USBTxQueue;
 	size_t m_nUSBTxDroppedReported;
 
