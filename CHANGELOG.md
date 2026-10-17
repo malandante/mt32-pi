@@ -45,6 +45,14 @@ Planned as golem-1.1.0.
   the sound does not depend on the banks used before. Button 1 cycles through the available engines; button 2 selects
   the next bank in OPL3 mode.
 
+- Experimental `[audio] next_input` and `next_input_gain`: the Next sends the
+  output of its mixer back to the Pi over I2S (PCM_DIN, GPIO 20, with NextReg
+  `$A2` bit 4 set); the Pi receives it (Circle I2S in both directions, as clock
+  master, sending silence) and mixes it with the synth on the PWM or HDMI
+  output. DC blocker for the mixer's resting level, ring buffer between the
+  receive interrupt and the audio task. Host test models the Next core's I2S
+  transmitter bit by bit against the Pi's receiver.
+
 ### Changed
 
 - GPIO serial MIDI stays enabled when USB MIDI devices are attached (upstream
