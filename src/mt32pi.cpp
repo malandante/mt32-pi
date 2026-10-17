@@ -185,6 +185,8 @@ CMT32Pi::CMT32Pi(CI2CMaster* pI2CMaster, CSPIMaster* pSPIMaster, CInterruptSyste
 	  m_nLEDOnTime(0),
 
 	  m_pSound(nullptr),
+
+	  m_pNextAudio(nullptr),
 	  m_pPisound(nullptr),
 
 	  m_nMasterVolume(100),
@@ -335,6 +337,19 @@ bool CMT32Pi::Initialize(bool bSerialMIDIAvailable)
 	if (!m_pSound->AllocateQueueFrames(nQueueSize))
 		LOGPANIC("Failed to allocate sound queue");
 
+	// Experimental: the Next's own audio over I2S, mixed into a PWM or HDMI
+	// output (with I2S output it would go back into the Next)
+	if (m_pConfig->AudioNextInput)
+	{
+		if (m_pConfig->AudioOutputDevice == CConfig::TAudioOutputDevice::I2S || m_pPisound)
+			LOGWARN("next_input needs output_device = pwm or hdmi; ignored");
+		else
+		{
+			LCDLog(TLCDLogType::Startup, "Init Next audio in");
+			m_pNextAudio = new CNextAudioInput(m_pInterrupt, m_pConfig->AudioSampleRate, m_pConfig->AudioChunkSize);
+		}
+	}
+
 	LCDLog(TLCDLogType::Startup, "Init controls");
 	if (m_pConfig->ControlScheme == CConfig::TControlScheme::SimpleButtons)
 		m_pControl = new CControlSimpleButtons(m_EventQueue);
@@ -395,7 +410,9 @@ bool CMT32Pi::Initialize(bool bSerialMIDIAvailable)
 		LOGNOTE("Using serial MIDI interface");
 
 	CCPUThrottle::Get()->DumpStatus();
-	SetPowerSaveTimeout(m_pConfig->SystemPowerSaveTimeout);
+
+	// The Next may be playing even when the synth is idle: no power saving
+	SetPowerSaveTimeout(m_pNextAudio ? 0 : m_pConfig->SystemPowerSaveTimeout);
 
 	// Clear LCD
 	if (m_pLCD)
@@ -403,6 +420,12 @@ bool CMT32Pi::Initialize(bool bSerialMIDIAvailable)
 
 	// Start audio
 	m_pSound->Start();
+	if (m_pNextAudio && !m_pNextAudio->Start())
+	{
+		LOGERR("Next audio input failed to start");
+		delete m_pNextAudio;
+		m_pNextAudio = nullptr;
+	}
 
 	// Start other cores
 	if (!CMultiCoreSupport::Initialize())
@@ -628,6 +651,8 @@ void CMT32Pi::UITask()
 	// Display current MT-32 ROM version/SoundFont
 	m_pCurrentSynth->ReportStatus();
 
+	unsigned int nNextAudioLogTime = CTimer::GetClockTicks();
+
 	while (m_bRunning)
 	{
 		const unsigned int nTicks = CTimer::GetClockTicks();
@@ -637,6 +662,13 @@ void CMT32Pi::UITask()
 		{
 			m_UserInterface.Update(*m_pLCD, *m_pCurrentSynth, nTicks);
 			m_nLCDUpdateTime = nTicks;
+		}
+
+		// Experimental Next audio input: its counters every 10 seconds
+		if (m_pNextAudio && (nTicks - nNextAudioLogTime) >= Utility::MillisToTicks(10000))
+		{
+			m_pNextAudio->LogStatus();
+			nNextAudioLogTime = nTicks;
 		}
 
 		// Poll MiSTer interface
@@ -680,6 +712,7 @@ void CMT32Pi::AudioTask()
 	const u8 nBytesPerFrame = 2 * nBytesPerSample;
 
 	const size_t nQueueSizeFrames = m_pSound->GetQueueSizeFrames();
+	const float nNextInputGain = m_pConfig->AudioNextInputGain;
 
 	// Extra byte so that we can write to the 24-bit buffer with overlapping 32-bit writes (efficiency)
 	float FloatBuffer[nQueueSizeFrames * nChannels];
@@ -693,6 +726,9 @@ void CMT32Pi::AudioTask()
 		const size_t nWriteBytes = nFrames * nBytesPerFrame;
 
 		m_pCurrentSynth->Render(FloatBuffer, nFrames);
+
+		if (m_pNextAudio)
+			m_pNextAudio->MixInto(FloatBuffer, nFrames, nNextInputGain);
 
 		if (bReversedStereo)
 		{
