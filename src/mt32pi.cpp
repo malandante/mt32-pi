@@ -120,6 +120,7 @@ enum class TGolemParameter : u8
 	MIDIChannels = 0x02,	// 0 standard (2-10), 1 alternate (1-8, 10), MT-32
 	USBInThru    = 0x03,	// 0/1, USB MIDI input also to USB MIDI devices
 	KeysToNext   = 0x04,	// 0/1, USB MIDI input also to the Next (GPIO serial)
+	OPL3Bank     = 0x05,	// 0-78, libADLMIDI embedded bank
 };
 constexpr u8 GolemParameterQuery = 0x7F;
 
@@ -190,6 +191,7 @@ CMT32Pi::CMT32Pi(CI2CMaster* pI2CMaster, CSPIMaster* pSPIMaster, CInterruptSyste
 	  m_pCurrentSynth(nullptr),
 	  m_pMT32Synth(nullptr),
 	  m_pSoundFontSynth(nullptr),
+	  m_pOPL3Synth(nullptr),
 
 	  m_ExternalMIDIParser(this),
 	  m_USBSerialMIDIParser(this),
@@ -352,11 +354,16 @@ bool CMT32Pi::Initialize(bool bSerialMIDIAvailable)
 	LCDLog(TLCDLogType::Startup, "Init FluidSynth");
 	InitSoundFontSynth();
 
+	LCDLog(TLCDLogType::Startup, "Init OPL3");
+	InitOPL3Synth();
+
 	// Set initial synthesizer
 	if (m_pConfig->SystemDefaultSynth == CConfig::TSystemDefaultSynth::MT32)
 		m_pCurrentSynth = m_pMT32Synth;
 	else if (m_pConfig->SystemDefaultSynth == CConfig::TSystemDefaultSynth::SoundFont)
 		m_pCurrentSynth = m_pSoundFontSynth;
+	else if (m_pConfig->SystemDefaultSynth == CConfig::TSystemDefaultSynth::OPL3)
+		m_pCurrentSynth = m_pOPL3Synth;
 
 	if (!m_pCurrentSynth)
 	{
@@ -367,6 +374,8 @@ bool CMT32Pi::Initialize(bool bSerialMIDIAvailable)
 			m_pCurrentSynth = m_pMT32Synth;
 		else if (m_pSoundFontSynth)
 			m_pCurrentSynth = m_pSoundFontSynth;
+		else if (m_pOPL3Synth)
+			m_pCurrentSynth = m_pOPL3Synth;
 		else
 		{
 			LOGPANIC("No synths available; ROMs/SoundFonts not found");
@@ -489,6 +498,25 @@ bool CMT32Pi::InitSoundFontSynth()
 	}
 
 	m_pSoundFontSynth->SetUserInterface(&m_UserInterface);
+
+	return true;
+}
+
+bool CMT32Pi::InitOPL3Synth()
+{
+	assert(m_pOPL3Synth == nullptr);
+
+	// Needs no files: the instrument banks are built in
+	m_pOPL3Synth = new COPL3Synth(m_pConfig->AudioSampleRate);
+	if (!m_pOPL3Synth->Initialize())
+	{
+		LOGWARN("OPL3 init failed");
+		delete m_pOPL3Synth;
+		m_pOPL3Synth = nullptr;
+		return false;
+	}
+
+	m_pOPL3Synth->SetUserInterface(&m_UserInterface);
 
 	return true;
 }
@@ -950,6 +978,8 @@ void CMT32Pi::SetUSBOutMode(CConfig::TMIDIUSBOut Mode)
 			m_pMT32Synth->AllSoundOff();
 		if (m_pSoundFontSynth)
 			m_pSoundFontSynth->AllSoundOff();
+		if (m_pOPL3Synth)
+			m_pOPL3Synth->AllSoundOff();
 	}
 
 	const char* pModeName = Mode == CConfig::TMIDIUSBOut::Off    ? "off" :
@@ -1100,7 +1130,7 @@ bool CMT32Pi::ParseGolemSysEx(const u8* pData, size_t nSize)
 			}
 
 			const u8 nSynth = pData[8];
-			if (nSynth > static_cast<u8>(TSynth::SoundFont))
+			if (nSynth > static_cast<u8>(TSynth::OPL3))
 			{
 				SendGolemError(nTransaction, nCommand, static_cast<u8>(TGolemError::InvalidParameter));
 				return true;
@@ -1109,6 +1139,8 @@ bool CMT32Pi::ParseGolemSysEx(const u8* pData, size_t nSize)
 			CSynthBase* pRequestedSynth = nullptr;
 			if (nSynth == static_cast<u8>(TSynth::MT32))
 				pRequestedSynth = m_pMT32Synth;
+			else if (nSynth == static_cast<u8>(TSynth::OPL3))
+				pRequestedSynth = m_pOPL3Synth;
 			else
 				pRequestedSynth = m_pSoundFontSynth;
 			if (pRequestedSynth == nullptr)
@@ -1233,6 +1265,7 @@ bool CMT32Pi::ParseGolemSysEx(const u8* pData, size_t nSize)
 				case TGolemParameter::MIDIChannels:
 				case TGolemParameter::USBInThru:
 				case TGolemParameter::KeysToNext:   nMax = 1;   break;
+				case TGolemParameter::OPL3Bank:     nMax = static_cast<u8>(COPL3Synth::GetBankCount() - 1); break;
 				default:
 					SendGolemError(nTransaction, nCommand, static_cast<u8>(TGolemError::InvalidParameter));
 					return true;
@@ -1245,7 +1278,8 @@ bool CMT32Pi::ParseGolemSysEx(const u8* pData, size_t nSize)
 			}
 
 			if ((Parameter == TGolemParameter::Effects && !m_pSoundFontSynth) ||
-			    (Parameter == TGolemParameter::MIDIChannels && !m_pMT32Synth))
+			    (Parameter == TGolemParameter::MIDIChannels && !m_pMT32Synth) ||
+			    (Parameter == TGolemParameter::OPL3Bank && !m_pOPL3Synth))
 			{
 				SendGolemError(nTransaction, nCommand, static_cast<u8>(TGolemError::Unavailable));
 				return true;
@@ -1296,6 +1330,12 @@ bool CMT32Pi::ParseGolemSysEx(const u8* pData, size_t nSize)
 						LCDLog(TLCDLogType::Notice, "Keys to Next: %s", nValue ? "on" : "off");
 					}
 					nCurrent = m_pConfig->GolemKeysToNext;
+					break;
+
+				case TGolemParameter::OPL3Bank:
+					if (!bQuery && m_pOPL3Synth->SetBank(nValue))
+						LCDLog(TLCDLogType::Notice, "OPL3 bank %d", nValue);
+					nCurrent = static_cast<u8>(m_pOPL3Synth->GetBank());
 					break;
 			}
 
@@ -1349,7 +1389,9 @@ bool CMT32Pi::SaveGolemSettings()
 	                 "# whose values it overrides. .golem save clear deletes it.\n"
 	                 "\n[system]\ndefault_synth = %s\n"
 	                 "\n[midi]\nusb_out = %s\nusb_in_thru = %s\n",
-	                 m_pCurrentSynth == m_pSoundFontSynth ? "soundfont" : "mt32",
+	                 m_pCurrentSynth == m_pSoundFontSynth ? "soundfont" :
+	                 m_pCurrentSynth == m_pOPL3Synth      ? "opl3" :
+	                                                        "mt32",
 	                 USBOutNames[static_cast<u8>(m_USBOutMode)],
 	                 m_pConfig->MIDIUSBInThru ? "on" : "off");
 
@@ -1368,6 +1410,9 @@ bool CMT32Pi::SaveGolemSettings()
 		n += snprintf(Text + n, sizeof(Text) - n,
 		              "\n[fluidsynth]\nsoundfont = %u\n",
 		              static_cast<unsigned>(m_pSoundFontSynth->GetSoundFontIndex()));
+
+	if (m_pOPL3Synth)
+		n += snprintf(Text + n, sizeof(Text) - n, "\n[opl3]\nbank = %d\n", m_pOPL3Synth->GetBank());
 
 	n += snprintf(Text + n, sizeof(Text) - n, "\n[golem]\nvolume = %d\nkeys = %s\n", m_nMasterVolume,
 	              m_pConfig->GolemKeysToNext ? "on" : "off");
@@ -1474,12 +1519,16 @@ void CMT32Pi::SendGolemStatus(u8 nTransaction)
 		nAvailability |= 1 << 0;
 	if (m_pSoundFontSynth)
 		nAvailability |= 1 << 1;
+	if (m_pOPL3Synth)
+		nAvailability |= 1 << 2;
 
 	u8 nSynth = 0x7F;
 	if (m_pCurrentSynth == m_pMT32Synth && m_pMT32Synth)
 		nSynth = static_cast<u8>(TSynth::MT32);
 	else if (m_pCurrentSynth == m_pSoundFontSynth && m_pSoundFontSynth)
 		nSynth = static_cast<u8>(TSynth::SoundFont);
+	else if (m_pCurrentSynth == m_pOPL3Synth && m_pOPL3Synth)
+		nSynth = static_cast<u8>(TSynth::OPL3);
 
 	u8 nROMSet = 0x7F;
 	if (m_pMT32Synth)
@@ -1803,6 +1852,8 @@ void CMT32Pi::ProcessEventQueue()
 					m_pMT32Synth->AllSoundOff();
 				if (m_pSoundFontSynth)
 					m_pSoundFontSynth->AllSoundOff();
+				if (m_pOPL3Synth)
+					m_pOPL3Synth->AllSoundOff();
 				break;
 
 			case TEventType::DisplayImage:
@@ -1829,16 +1880,32 @@ void CMT32Pi::ProcessButtonEvent(const TButtonEvent& Event)
 
 	if (Event.Button == TButton::Button1 && !Event.bRepeat)
 	{
-		// Swap synths
-		if (m_pCurrentSynth == m_pMT32Synth)
-			SwitchSynth(TSynth::SoundFont);
-		else
-			SwitchSynth(TSynth::MT32);
+		// Next available synth: MT-32, SoundFont, OPL3
+		CSynthBase* const Synths[] = {m_pMT32Synth, m_pSoundFontSynth, m_pOPL3Synth};
+		size_t nCurrent = 0;
+		while (nCurrent < 3 && Synths[nCurrent] != m_pCurrentSynth)
+			++nCurrent;
+		for (size_t i = 1; i < 3; ++i)
+		{
+			const size_t nNext = (nCurrent + i) % 3;
+			if (Synths[nNext])
+			{
+				SwitchSynth(static_cast<TSynth>(nNext));
+				break;
+			}
+		}
 	}
 	else if (Event.Button == TButton::Button2 && !Event.bRepeat)
 	{
 		if (m_pCurrentSynth == m_pMT32Synth)
 			NextMT32ROMSet();
+		else if (m_pCurrentSynth == m_pOPL3Synth)
+		{
+			// Next OPL3 bank
+			const int nBank = (m_pOPL3Synth->GetBank() + 1) % COPL3Synth::GetBankCount();
+			if (m_pOPL3Synth->SetBank(nBank))
+				m_pOPL3Synth->ReportStatus();
+		}
 		else
 		{
 			// Next SoundFont
@@ -1883,6 +1950,8 @@ void CMT32Pi::SwitchSynth(TSynth NewSynth)
 		pNewSynth = m_pMT32Synth;
 	else if (NewSynth == TSynth::SoundFont)
 		pNewSynth = m_pSoundFontSynth;
+	else if (NewSynth == TSynth::OPL3)
+		pNewSynth = m_pOPL3Synth;
 
 	if (pNewSynth == nullptr)
 	{
@@ -1898,7 +1967,9 @@ void CMT32Pi::SwitchSynth(TSynth NewSynth)
 
 	m_pCurrentSynth->AllSoundOff();
 	m_pCurrentSynth = pNewSynth;
-	const char* pMode = NewSynth == TSynth::MT32 ? "MT-32 mode" : "SoundFont mode";
+	const char* pMode = NewSynth == TSynth::MT32      ? "MT-32 mode" :
+	                    NewSynth == TSynth::SoundFont ? "SoundFont mode" :
+	                                                    "OPL3 mode";
 	LOGNOTE("Switching to %s", pMode);
 	LCDLog(TLCDLogType::Notice, pMode);
 }
@@ -1960,8 +2031,10 @@ void CMT32Pi::SetMasterVolume(s32 nVolume)
 		m_pMT32Synth->SetMasterVolume(m_nMasterVolume);
 	if (m_pSoundFontSynth)
 		m_pSoundFontSynth->SetMasterVolume(m_nMasterVolume);
+	if (m_pOPL3Synth)
+		m_pOPL3Synth->SetMasterVolume(m_nMasterVolume);
 
-	if (m_pCurrentSynth == m_pSoundFontSynth)
+	if (m_pCurrentSynth == m_pSoundFontSynth || m_pCurrentSynth == m_pOPL3Synth)
 		LCDLog(TLCDLogType::Notice, "Volume: %d", m_nMasterVolume);
 }
 

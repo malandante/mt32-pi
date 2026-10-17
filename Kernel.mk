@@ -30,6 +30,7 @@ OBJS		:=	src/config.o \
 			src/rommanager.o \
 			src/soundfontmanager.o \
 			src/synth/mt32synth.o \
+			src/synth/opl3synth.o \
 			src/synth/soundfontsynth.o \
 			src/zoneallocator.o
 
@@ -83,6 +84,9 @@ EXTRALIBS	+=	$(MT32EMULIB)
 INCLUDE		+=	-I $(FLUIDSYNTHBUILDDIR)/include \
 			-I $(FLUIDSYNTHHOME)/include
 EXTRALIBS	+=	$(FLUIDSYNTHLIB)
+
+INCLUDE		+=	-I $(ADLMIDIHOME)/include
+EXTRALIBS	+=	$(ADLMIDILIB)
 
 #
 # Generate version string from git tag
