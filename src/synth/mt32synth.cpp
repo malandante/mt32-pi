@@ -49,6 +49,8 @@ CMT32Synth::CMT32Synth(unsigned nSampleRate, float nGain, float nReverbGain, TRe
 	  m_nReverbGain(nReverbGain),
 
 	  m_ResamplerQuality(ResamplerQuality),
+	  m_MIDIChannels(TMIDIChannels::Standard),
+	  m_nMasterVolume(100),
 	  m_pSampleRateConverter(nullptr),
 
 	  m_CurrentROMSet(TMT32ROMSet::Any),
@@ -131,6 +133,72 @@ void CMT32Synth::HandleMIDIShortMessage(u32 nMessage)
 void CMT32Synth::HandleMIDISysExMessage(const u8* pData, size_t nSize)
 {
 	m_pSynth->playSysex(pData, nSize);
+
+	// The reset restores the factory channels and volume; queue the kept
+	// ones right behind it so the notes that follow already use them.
+	if (IsResetSysEx(pData, nSize))
+		QueueKeptSettings();
+}
+
+// Roland DT1 to the MT-32 reset area: F0 41 dd 16 12 7F ...
+bool CMT32Synth::IsResetSysEx(const u8* pData, size_t nSize)
+{
+	return nSize >= 7 &&
+	       pData[1] == 0x41 &&
+	       (pData[2] & 0xF0) == 0x10 &&
+	       pData[3] == 0x16 &&
+	       pData[4] == 0x12 &&
+	       pData[5] == 0x7F;
+}
+
+// Written straight away: after open() or a host setting
+void CMT32Synth::ApplyKeptSettings()
+{
+	if (m_MIDIChannels == TMIDIChannels::Alternate)
+		m_pSynth->writeSysex(0x10, AlternateMIDIChannelsSysEx, sizeof(AlternateMIDIChannelsSysEx));
+
+	if (m_nMasterVolume != 100)
+	{
+		const u8 SetVolumeSysEx[] = { 0x10, 0x00, 0x16, m_nMasterVolume };
+		m_pSynth->writeSysex(0x10, SetVolumeSysEx, sizeof(SetVolumeSysEx));
+	}
+}
+
+// Queued: in order with the MIDI stream, behind a reset
+void CMT32Synth::QueueKeptSettings()
+{
+	if (m_MIDIChannels == TMIDIChannels::Alternate)
+		QueueRolandWrite(AlternateMIDIChannelsSysEx, sizeof(AlternateMIDIChannelsSysEx));
+
+	if (m_nMasterVolume != 100)
+	{
+		const u8 SetVolumeSysEx[] = { 0x10, 0x00, 0x16, m_nMasterVolume };
+		QueueRolandWrite(SetVolumeSysEx, sizeof(SetVolumeSysEx));
+	}
+}
+
+void CMT32Synth::QueueRolandWrite(const u8* pAddressAndData, size_t nSize)
+{
+	u8 Message[16];
+	if (nSize + 7 > sizeof(Message))
+		return;
+
+	size_t n = 0;
+	u8 nSum = 0;
+	Message[n++] = 0xF0;
+	Message[n++] = 0x41;
+	Message[n++] = 0x10;
+	Message[n++] = 0x16;
+	Message[n++] = 0x12;
+	for (size_t i = 0; i < nSize; ++i)
+	{
+		Message[n++] = pAddressAndData[i];
+		nSum += pAddressAndData[i];
+	}
+	Message[n++] = (128 - (nSum & 0x7F)) & 0x7F;
+	Message[n++] = 0xF7;
+
+	m_pSynth->playSysex(Message, n);
 }
 
 void CMT32Synth::AllSoundOff()
@@ -145,6 +213,7 @@ void CMT32Synth::AllSoundOff()
 
 void CMT32Synth::SetMasterVolume(u8 nVolume)
 {
+	m_nMasterVolume = nVolume;
 	const u8 SetVolumeSysEx[] = { 0x10, 0x00, 0x16, nVolume };
 	m_pSynth->writeSysex(0x10, SetVolumeSysEx, sizeof(SetVolumeSysEx));
 }
@@ -218,6 +287,7 @@ void CMT32Synth::UpdateLCD(CLCD& LCD, unsigned int nTicks)
 
 void CMT32Synth::SetMIDIChannels(TMIDIChannels Channels)
 {
+	m_MIDIChannels = Channels;
 	if (Channels == TMIDIChannels::Standard)
 		m_pSynth->writeSysex(0x10, StandardMIDIChannelsSysEx, sizeof(StandardMIDIChannelsSysEx));
 	else
@@ -251,6 +321,7 @@ bool CMT32Synth::SwitchROMSet(TMT32ROMSet ROMSet)
 	assert(m_pSynth->open(*pControlROMImage, *pPCMROMImage));
 	m_pSynth->setOutputGain(m_nGain);
 	m_pSynth->setReverbOutputGain(m_nReverbGain);
+	ApplyKeptSettings();
 	m_Lock.Release();
 
 	m_pControlROMImage = pControlROMImage;

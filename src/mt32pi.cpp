@@ -71,6 +71,7 @@ enum class TGolemCommand : u8
 	SetMT32ROMSet  = 0x02,
 	SetSoundFont   = 0x03,
 	SetUSBOut      = 0x04,
+	SetParameter   = 0x05,
 };
 
 enum class TGolemResponse : u8
@@ -98,7 +99,18 @@ enum TGolemCapability : u16
 	GolemCapabilitySetROMSet    = 1 << 2,
 	GolemCapabilitySetSoundFont = 1 << 3,
 	GolemCapabilitySetUSBOut    = 1 << 4,
+	GolemCapabilitySetParameter = 1 << 5,
 };
+
+// SET_PARAMETER: parameter numbers and the value that only reports
+enum class TGolemParameter : u8
+{
+	Volume       = 0x00,	// 0-100, both synths (as the buttons and encoder)
+	Effects      = 0x01,	// 0/1, FluidSynth reverb and chorus
+	MIDIChannels = 0x02,	// 0 standard (2-10), 1 alternate (1-8, 10), MT-32
+	USBInThru    = 0x03,	// 0/1, USB MIDI input also to USB MIDI devices
+};
+constexpr u8 GolemParameterQuery = 0x7F;
 
 // SET_USB_OUT parameter that only reports the current mode
 constexpr u8 GolemUSBOutQuery = 0x7F;
@@ -1145,6 +1157,89 @@ bool CMT32Pi::ParseGolemSysEx(const u8* pData, size_t nSize)
 			return true;
 		}
 
+		case TGolemCommand::SetParameter:
+		{
+			// Payload: parameter, value (0x7F = report only). READY carries
+			// the parameter and its value. Settings last until power-off.
+			if (nSize != GolemHeaderSize + 3)
+			{
+				SendGolemError(nTransaction, nCommand, static_cast<u8>(TGolemError::MalformedRequest));
+				return true;
+			}
+
+			const auto Parameter = static_cast<TGolemParameter>(pData[8]);
+			const u8 nValue      = pData[9];
+			const bool bQuery    = nValue == GolemParameterQuery;
+			u8 nMax;
+
+			switch (Parameter)
+			{
+				case TGolemParameter::Volume:       nMax = 100; break;
+				case TGolemParameter::Effects:
+				case TGolemParameter::MIDIChannels:
+				case TGolemParameter::USBInThru:    nMax = 1;   break;
+				default:
+					SendGolemError(nTransaction, nCommand, static_cast<u8>(TGolemError::InvalidParameter));
+					return true;
+			}
+
+			if (!bQuery && nValue > nMax)
+			{
+				SendGolemError(nTransaction, nCommand, static_cast<u8>(TGolemError::InvalidParameter));
+				return true;
+			}
+
+			if ((Parameter == TGolemParameter::Effects && !m_pSoundFontSynth) ||
+			    (Parameter == TGolemParameter::MIDIChannels && !m_pMT32Synth))
+			{
+				SendGolemError(nTransaction, nCommand, static_cast<u8>(TGolemError::Unavailable));
+				return true;
+			}
+
+			SendGolemResponse(nTransaction, static_cast<u8>(TGolemResponse::Accepted), nCommand);
+
+			u8 nCurrent = 0;
+			switch (Parameter)
+			{
+				case TGolemParameter::Volume:
+					if (!bQuery)
+						SetMasterVolume(nValue);
+					nCurrent = m_nMasterVolume;
+					break;
+
+				case TGolemParameter::Effects:
+					if (!bQuery)
+					{
+						m_pSoundFontSynth->SetEffects(nValue);
+						LCDLog(TLCDLogType::Notice, "Effects: %s", nValue ? "on" : "off");
+					}
+					nCurrent = m_pSoundFontSynth->GetEffects();
+					break;
+
+				case TGolemParameter::MIDIChannels:
+					if (!bQuery)
+					{
+						m_pMT32Synth->SetMIDIChannels(nValue ? CMT32Synth::TMIDIChannels::Alternate : CMT32Synth::TMIDIChannels::Standard);
+						LCDLog(TLCDLogType::Notice, "MT-32 ch: %s", nValue ? "1-8,10" : "2-10");
+					}
+					nCurrent = m_pMT32Synth->GetMIDIChannels() == CMT32Synth::TMIDIChannels::Alternate;
+					break;
+
+				case TGolemParameter::USBInThru:
+					if (!bQuery)
+					{
+						m_pConfig->MIDIUSBInThru = nValue;
+						LCDLog(TLCDLogType::Notice, "USB in thru: %s", nValue ? "on" : "off");
+					}
+					nCurrent = m_pConfig->MIDIUSBInThru;
+					break;
+			}
+
+			const u8 Payload[] = {static_cast<u8>(Parameter), nCurrent};
+			SendGolemResponse(nTransaction, static_cast<u8>(TGolemResponse::Ready), nCommand, Payload, sizeof(Payload));
+			return true;
+		}
+
 		default:
 			SendGolemError(nTransaction, nCommand, static_cast<u8>(TGolemError::UnknownCommand));
 			return true;
@@ -1194,7 +1289,8 @@ void CMT32Pi::SendGolemStatus(u8 nTransaction)
 	                             GolemCapabilitySetSynth |
 	                             GolemCapabilitySetROMSet |
 	                             GolemCapabilitySetSoundFont |
-	                             GolemCapabilitySetUSBOut;
+	                             GolemCapabilitySetUSBOut |
+	                             GolemCapabilitySetParameter;
 
 	u8 nAvailability = 0;
 	if (m_pMT32Synth)

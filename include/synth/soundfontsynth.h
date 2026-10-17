@@ -51,6 +51,11 @@ public:
 
 	bool SwitchSoundFont(size_t nIndex);
 	size_t GetSoundFontIndex() const { return m_nCurrentSoundFontIndex; }
+
+	// Reverb and chorus on or off for every channel. Once set, it overrides
+	// the config and effects profile, also after a SoundFont change.
+	void SetEffects(bool bEnabled);
+	bool GetEffects() const { return m_bEffects; }
 	CSoundFontManager& GetSoundFontManager() { return m_SoundFontManager; }
 
 private:
@@ -68,6 +73,8 @@ private:
 
 	u8 m_nVolume;
 	float m_nInitialGain;
+	bool m_bEffects;
+	bool m_bEffectsSet;
 
 	u16 m_nPercussionMask;
 	size_t m_nCurrentSoundFontIndex;
