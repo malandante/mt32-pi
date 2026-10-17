@@ -128,7 +128,7 @@ constexpr u8 GolemUSBOutQuery = 0x7F;
 
 CMT32Pi* CMT32Pi::s_pThis = nullptr;
 
-CMT32Pi::CMT32Pi(CI2CMaster* pI2CMaster, CSPIMaster* pSPIMaster, CInterruptSystem* pInterrupt, CGPIOManager* pGPIOManager, CSerialDevice* pSerialDevice, CUSBHCIDevice* pUSBHCI)
+CMT32Pi::CMT32Pi(CI2CMaster* pI2CMaster, CSPIMaster* pSPIMaster, CInterruptSystem* pInterrupt, CGPIOManager* pGPIOManager, CMIDISerialDevice* pSerialDevice, CUSBHCIDevice* pUSBHCI)
 	: CMultiCoreSupport(CMemorySystem::Get()),
 	  CMIDIParser(),
 
@@ -870,7 +870,7 @@ void CMT32Pi::SendToHost(const u8* pData, size_t nSize)
 	if (!m_bSerialMIDIEnabled || m_pSerial == nullptr)
 		return;
 
-	if (m_pSerial->AvailableForWrite() < nSize)
+	if (m_pSerial->GetFreeWriteSpace() < nSize)
 	{
 		if (m_nKeysToNextDropped++ == 0)
 			LOGWARN("Keys to Next: serial port busy, message dropped");

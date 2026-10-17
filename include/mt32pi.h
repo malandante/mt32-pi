@@ -47,6 +47,7 @@
 #include <wlan/bcm4343.h>
 #include <wlan/hostap/wpa_supplicant/wpasupplicant.h>
 
+#include "midiserialdevice.h"
 #include "config.h"
 #include "control/control.h"
 #include "control/mister.h"
@@ -70,7 +71,7 @@
 class CMT32Pi : CMultiCoreSupport, CPower, CMIDIParser, CAppleMIDIHandler, CUDPMIDIHandler
 {
 public:
-	CMT32Pi(CI2CMaster* pI2CMaster, CSPIMaster* pSPIMaster, CInterruptSystem* pInterrupt, CGPIOManager* pGPIOManager, CSerialDevice* pSerialDevice, CUSBHCIDevice* pUSBHCI);
+	CMT32Pi(CI2CMaster* pI2CMaster, CSPIMaster* pSPIMaster, CInterruptSystem* pInterrupt, CGPIOManager* pGPIOManager, CMIDISerialDevice* pSerialDevice, CUSBHCIDevice* pUSBHCI);
 	virtual ~CMT32Pi() override;
 
 	bool Initialize(bool bSerialMIDIAvailable = true);
@@ -188,7 +189,7 @@ private:
 	CSPIMaster* m_pSPIMaster;
 	CInterruptSystem* m_pInterrupt;
 	CGPIOManager* m_pGPIOManager;
-	CSerialDevice* m_pSerial;
+	CMIDISerialDevice* m_pSerial;
 	CUSBHCIDevice* m_pUSBHCI;
 	FATFS m_USBFileSystem;
 	bool m_bUSBAvailable;
