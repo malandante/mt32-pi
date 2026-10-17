@@ -40,7 +40,9 @@ unsigned CNextAudioInput::GetChunk(u32* pBuffer, unsigned nChunkSize)
 
 void CNextAudioInput::PutChunk(const u32* pBuffer, unsigned nChunkSize)
 {
-	m_Ring.Put(pBuffer, nChunkSize / 2);
+	// u32 is unsigned int and uint32_t unsigned long on 32-bit ARM: same width
+	static_assert(sizeof(u32) == sizeof(uint32_t), "32-bit words");
+	m_Ring.Put(reinterpret_cast<const uint32_t*>(pBuffer), nChunkSize / 2);
 }
 
 void CNextAudioInput::LogStatus() const
