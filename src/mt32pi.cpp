@@ -1265,7 +1265,7 @@ bool CMT32Pi::ParseGolemSysEx(const u8* pData, size_t nSize)
 				case TGolemParameter::MIDIChannels:
 				case TGolemParameter::USBInThru:
 				case TGolemParameter::KeysToNext:   nMax = 1;   break;
-				case TGolemParameter::OPL3Bank:     nMax = static_cast<u8>(COPL3Synth::GetBankCount() - 1); break;
+				case TGolemParameter::OPL3Bank:     nMax = static_cast<u8>(m_pOPL3Synth ? m_pOPL3Synth->GetBankCount() - 1 : 127); break;
 				default:
 					SendGolemError(nTransaction, nCommand, static_cast<u8>(TGolemError::InvalidParameter));
 					return true;
@@ -1902,7 +1902,7 @@ void CMT32Pi::ProcessButtonEvent(const TButtonEvent& Event)
 		else if (m_pCurrentSynth == m_pOPL3Synth)
 		{
 			// Next OPL3 bank
-			const int nBank = (m_pOPL3Synth->GetBank() + 1) % COPL3Synth::GetBankCount();
+			const int nBank = (m_pOPL3Synth->GetBank() + 1) % m_pOPL3Synth->GetBankCount();
 			if (m_pOPL3Synth->SetBank(nBank))
 				m_pOPL3Synth->ReportStatus();
 		}

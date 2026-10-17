@@ -4,7 +4,8 @@
 // mt32-pi - A baremetal MIDI synthesizer for Raspberry Pi
 //
 // OPL3 FM synthesis (Sound Blaster 16 / AdLib sound) with libADLMIDI: General
-// MIDI through one of its embedded instrument banks.
+// MIDI through one of its embedded instrument banks (0-78) or a WOPL bank file
+// from the SD card's opl3 folder (79 onwards, in alphabetical order).
 //
 // This file is part of mt32-pi.
 //
@@ -25,6 +26,7 @@
 #ifndef _opl3synth_h
 #define _opl3synth_h
 
+#include <circle/string.h>
 #include <circle/types.h>
 
 #include <adlmidi.h>
@@ -34,6 +36,9 @@
 class COPL3Synth : public CSynthBase
 {
 public:
+	// Bank numbers travel as one 7-bit Golem byte
+	static constexpr int MaxBanks = 128;
+
 	COPL3Synth(unsigned int nSampleRate);
 	virtual ~COPL3Synth() override;
 
@@ -49,15 +54,30 @@ public:
 	virtual void ReportStatus() const override;
 	virtual void UpdateLCD(CLCD& LCD, unsigned int nTicks) override;
 
+	// Embedded banks first, then the files of the opl3 folder
 	bool SetBank(int nBank);
 	int GetBank() const { return m_nBank; }
-	static int GetBankCount();
-	static const char* GetBankName(int nBank);
+	int GetBankCount() const { return m_nEmbeddedBanks + m_nBankFiles; }
+	const char* GetBankName(int nBank) const;
 	const char* GetEmulatorName() const;
 
 private:
+	struct TBankFile
+	{
+		CString Path;
+		CString Name;
+	};
+
+	void ScanBankFiles();
+	ADL_MIDIPlayer* CreatePlayer(int nBank) const;
+
 	ADL_MIDIPlayer* m_pPlayer;
+	int m_nEmulator;
+	int m_nChips;
 	int m_nBank;
+	int m_nEmbeddedBanks;
+	int m_nBankFiles;
+	TBankFile m_BankFiles[MaxBanks];
 	u8 m_nVolume;
 	float m_nGain;
 	volatile bool m_bActive;

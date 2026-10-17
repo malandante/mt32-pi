@@ -33,6 +33,33 @@
 
 namespace OPL3MIDI
 {
+	// A player as the kernel sets it up: emulator, chips, soft panning, and
+	// either embedded bank nBank or, with pBankData, a WOPL bank file read
+	// into memory. Changing banks makes a new player, so the sound never
+	// depends on the banks used before (adl_setBank on a running player keeps
+	// some of the previous bank's settings). nullptr if anything fails.
+	inline ADL_MIDIPlayer* NewPlayer(unsigned nSampleRate, int nEmulator, int nChips, int nBank,
+	                                 const void* pBankData = nullptr, size_t nBankSize = 0)
+	{
+		ADL_MIDIPlayer* pPlayer = adl_init(nSampleRate);
+		if (!pPlayer)
+			return nullptr;
+
+		adl_switchEmulator(pPlayer, nEmulator);
+		adl_setNumChips(pPlayer, nChips);
+		adl_setSoftPanEnabled(pPlayer, 1);
+
+		const int nResult = pBankData ? adl_openBankData(pPlayer, pBankData, nBankSize)
+		                              : adl_setBank(pPlayer, nBank);
+		if (nResult < 0)
+		{
+			adl_close(pPlayer);
+			return nullptr;
+		}
+
+		return pPlayer;
+	}
+
 	// A short message as mt32-pi passes it: status in the low byte, then the
 	// data bytes.
 	inline void ShortMessage(ADL_MIDIPlayer* pPlayer, uint32_t nMessage)

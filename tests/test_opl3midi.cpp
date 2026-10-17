@@ -2,7 +2,7 @@
 // builds it (Makefile target adlmidi, without the cross toolchain).
 //
 //   test_opl3midi                 the checks
-//   test_opl3midi EVENTS OUT.WAV [BANK [EMULATOR]]
+//   test_opl3midi EVENTS OUT.WAV [BANK|FILE.wopl [EMULATOR]]
 //                                 renders a list of "ms b1 b2 b3" lines (from
 //                                 tests/smf_events.py) to a 48 kHz WAV, through
 //                                 the same calls and gain as the kernel
@@ -27,14 +27,36 @@ static void Check(bool bOk, const char* pName)
 constexpr unsigned SampleRate = 48000;
 constexpr float Gain = 2.5f;	// [opl3] gain default
 
+// A WOPL file from libADLMIDI's sources (a free bank), as a user would put
+// it in SD:opl3
+static const char BankFile[] = "external/libadlmidi/fm_banks/wopl_files/GM-By-J.A.Nguyen-and-Wohlstand.wopl";
+
+static std::vector<uint8_t> ReadFile(const char* pPath)
+{
+	std::vector<uint8_t> Data;
+	if (std::FILE* f = std::fopen(pPath, "rb"))
+	{
+		for (int c; (c = std::fgetc(f)) != EOF;)
+			Data.push_back(static_cast<uint8_t>(c));
+		std::fclose(f);
+	}
+	return Data;
+}
+
+// As COPL3Synth::CreatePlayer: an embedded bank number, or a .wopl path
+static ADL_MIDIPlayer* NewPlayer(const char* pBank, int nEmulator = ADLMIDI_EMU_NUKED)
+{
+	if (std::strstr(pBank, ".wopl"))
+	{
+		const std::vector<uint8_t> Data = ReadFile(pBank);
+		return Data.empty() ? nullptr : OPL3MIDI::NewPlayer(SampleRate, nEmulator, 1, 0, Data.data(), Data.size());
+	}
+	return OPL3MIDI::NewPlayer(SampleRate, nEmulator, 1, std::atoi(pBank));
+}
+
 static ADL_MIDIPlayer* NewPlayer(int nBank, int nEmulator = ADLMIDI_EMU_NUKED)
 {
-	ADL_MIDIPlayer* p = adl_init(SampleRate);
-	adl_switchEmulator(p, nEmulator);
-	adl_setNumChips(p, 1);
-	adl_setSoftPanEnabled(p, 1);
-	adl_setBank(p, nBank);
-	return p;
+	return OPL3MIDI::NewPlayer(SampleRate, nEmulator, 1, nBank);
 }
 
 // Peak over nMs milliseconds
@@ -127,9 +149,46 @@ static int Checks()
 		OPL3MIDI::ShortMessage(p, Msg(0x92, 60, 100));
 		Check(Run(p, 200) > 0.02f, "bent note sounds");
 
-		// Bank change at run time (as Golem SET_PARAM 5)
-		Check(adl_setBank(p, 0) == 0 && adl_setBank(p, 79) < 0, "banks 0..78 only");
 		adl_close(p);
+	}
+
+	// Banks: embedded 0-78; past that, players from WOPL files
+	Check(NewPlayer(78) != nullptr && NewPlayer(79) == nullptr, "embedded banks 0..78 only");
+	{
+		ADL_MIDIPlayer* p = NewPlayer(BankFile);
+		Check(p != nullptr, "WOPL bank file loads");
+		if (p)
+		{
+			OPL3MIDI::ShortMessage(p, Msg(0xC0, 48));
+			OPL3MIDI::ShortMessage(p, Msg(0x90, 60, 100));
+			Check(Run(p, 300) > 0.05f, "and plays");
+			adl_close(p);
+		}
+		std::vector<uint8_t> Data = ReadFile(BankFile);
+		const uint8_t Junk[64] = {'n', 'o', 't', ' ', 'a', ' ', 'b', 'a', 'n', 'k'};
+		Check(OPL3MIDI::NewPlayer(SampleRate, ADLMIDI_EMU_NUKED, 1, 0, Junk, sizeof(Junk)) == nullptr,
+		      "a file that is not WOPL is refused");
+		Check(Data.size() > 100 &&
+		      OPL3MIDI::NewPlayer(SampleRate, ADLMIDI_EMU_NUKED, 1, 0, Data.data(), Data.size() / 2) == nullptr,
+		      "a cut WOPL file is refused");
+	}
+
+	// A bank change builds a new player, so the sound does not depend on the
+	// banks used before: two new players for bank 72 play the same samples
+	{
+		std::vector<float> Out[2];
+		for (auto& o : Out)
+		{
+			ADL_MIDIPlayer* p = NewPlayer(72);
+			OPL3MIDI::ShortMessage(p, Msg(0xC0, 19));
+			for (uint8_t n : {48, 55, 60, 64})
+				OPL3MIDI::ShortMessage(p, Msg(0x90, n, 100));
+			o.resize(48000 * 2);
+			for (size_t i = 0; i < 48000; i += 256)
+				OPL3MIDI::Render(p, o.data() + i * 2, 48000 - i < 256 ? 48000 - i : 256, Gain);
+			adl_close(p);
+		}
+		Check(Out[0] == Out[1], "same bank, same sound");
 	}
 
 	std::printf("%s\n", g_nFailures ? "FAILED" : "all passed");
@@ -142,14 +201,16 @@ static void PutLE(std::FILE* f, uint32_t v, int n)
 		std::fputc(v >> (8 * i) & 0xFF, f);
 }
 
-static int RenderFile(const char* pEvents, const char* pOut, int nBank, int nEmulator)
+static int RenderFile(const char* pEvents, const char* pOut, const char* pBank, int nEmulator)
 {
 	std::FILE* in = std::fopen(pEvents, "r");
 	std::FILE* out = std::fopen(pOut, "wb");
 	if (!in || !out)
 		return 2;
 
-	ADL_MIDIPlayer* p = NewPlayer(nBank, nEmulator);
+	ADL_MIDIPlayer* p = NewPlayer(pBank, nEmulator);
+	if (!p)
+		return 2;
 	std::vector<int16_t> Samples;
 	float Buffer[256 * 2];
 	unsigned long nNow = 0;	// frames
@@ -190,14 +251,14 @@ static int RenderFile(const char* pEvents, const char* pOut, int nBank, int nEmu
 	std::fclose(out);
 	std::fclose(in);
 	adl_close(p);
-	std::printf("%s: %.1f s, bank %d (%s)\n", pOut, Samples.size() / 2.0 / SampleRate, nBank, adl_getBankNames()[nBank]);
+	std::printf("%s: %.1f s, bank %s\n", pOut, Samples.size() / 2.0 / SampleRate, pBank);
 	return 0;
 }
 
 int main(int argc, char** argv)
 {
 	if (argc >= 3)
-		return RenderFile(argv[1], argv[2], argc > 3 ? std::atoi(argv[3]) : 72,
+		return RenderFile(argv[1], argv[2], argc > 3 ? argv[3] : "72",
 		                  argc > 4 && !std::strcmp(argv[4], "dosbox") ? ADLMIDI_EMU_DOSBOX : ADLMIDI_EMU_NUKED);
 	return Checks();
 }

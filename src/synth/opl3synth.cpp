@@ -20,6 +20,10 @@
 //
 
 #include <circle/logger.h>
+#include <circle/util.h>
+#include <fatfs/ff.h>
+#include <string.h>
+#include <strings.h>
 
 #include "config.h"
 #include "lcd/ui.h"
@@ -31,10 +35,19 @@ LOGMODULE("opl3synth");
 // Below this peak a rendered buffer counts as silence
 constexpr float SilencePeak = 1.0f / 32768.0f;
 
+// WOPL bank files: SD:opl3/*.wopl. A full 128 + 128 instrument bank with
+// 4-operator voices is about 20 KB; anything far larger is not a bank.
+const char BankFileDirectory[] = "SD:opl3";
+constexpr FSIZE_t MaxBankFileSize = 512 * 1024;
+
 COPL3Synth::COPL3Synth(unsigned int nSampleRate)
 	: CSynthBase(nSampleRate),
 	  m_pPlayer(nullptr),
+	  m_nEmulator(ADLMIDI_EMU_NUKED),
+	  m_nChips(1),
 	  m_nBank(0),
+	  m_nEmbeddedBanks(0),
+	  m_nBankFiles(0),
 	  m_nVolume(100),
 	  m_nGain(1.0f),
 	  m_bActive(false),
@@ -52,41 +65,99 @@ bool COPL3Synth::Initialize()
 {
 	const CConfig* const pConfig = CConfig::Get();
 
-	m_pPlayer = adl_init(m_nSampleRate);
+	m_nEmulator = pConfig->OPL3Emulator == CConfig::TOPL3Emulator::DOSBox ? ADLMIDI_EMU_DOSBOX : ADLMIDI_EMU_NUKED;
+	m_nChips    = pConfig->OPL3Chips < 1 ? 1 : pConfig->OPL3Chips > 4 ? 4 : pConfig->OPL3Chips;
+	m_nGain     = pConfig->OPL3Gain;
+
+	m_nEmbeddedBanks = adl_getBanksCount();
+	if (m_nEmbeddedBanks > MaxBanks)
+		m_nEmbeddedBanks = MaxBanks;
+	ScanBankFiles();
+
+	// The configured bank, or the default one if it is missing (a bank file
+	// that has gone, for example)
+	int nBank = pConfig->OPL3Bank;
+	if (nBank < 0 || nBank >= GetBankCount())
+		nBank = 72 < m_nEmbeddedBanks ? 72 : 0;
+	m_pPlayer = CreatePlayer(nBank);
+	if (!m_pPlayer && nBank >= m_nEmbeddedBanks)
+	{
+		nBank = 72 < m_nEmbeddedBanks ? 72 : 0;
+		m_pPlayer = CreatePlayer(nBank);
+	}
 	if (!m_pPlayer)
 	{
 		LOGERR("Failed to create the OPL3 player");
 		return false;
 	}
-
-	const int nEmulator = pConfig->OPL3Emulator == CConfig::TOPL3Emulator::DOSBox ? ADLMIDI_EMU_DOSBOX : ADLMIDI_EMU_NUKED;
-	if (adl_switchEmulator(m_pPlayer, nEmulator) < 0)
-		LOGWARN("Emulator unavailable: %s", adl_errorInfo(m_pPlayer));
-
-	int nChips = pConfig->OPL3Chips;
-	if (nChips < 1)
-		nChips = 1;
-	else if (nChips > 4)
-		nChips = 4;
-	adl_setNumChips(m_pPlayer, nChips);
-	adl_setSoftPanEnabled(m_pPlayer, 1);
-
-	m_nGain = pConfig->OPL3Gain;
-
-	int nBank = pConfig->OPL3Bank;
-	if (nBank < 0 || nBank >= GetBankCount())
-		nBank = 0;
-	if (adl_setBank(m_pPlayer, nBank) < 0)
-	{
-		LOGERR("Bank %d: %s", nBank, adl_errorInfo(m_pPlayer));
-		adl_close(m_pPlayer);
-		m_pPlayer = nullptr;
-		return false;
-	}
 	m_nBank = nBank;
 
-	LOGNOTE("%s, %d chip(s), bank %d: %s", GetEmulatorName(), nChips, m_nBank, GetBankName(m_nBank));
+	LOGNOTE("%s, %d chip(s), bank %d: %s", GetEmulatorName(), m_nChips, m_nBank, GetBankName(m_nBank));
 	return true;
+}
+
+void COPL3Synth::ScanBankFiles()
+{
+	DIR Dir;
+	FILINFO FileInfo;
+	const int nMaxFiles = MaxBanks - m_nEmbeddedBanks;
+
+	m_nBankFiles = 0;
+	FRESULT Result = f_findfirst(&Dir, &FileInfo, BankFileDirectory, "*");
+	while (Result == FR_OK && *FileInfo.fname && m_nBankFiles < nMaxFiles)
+	{
+		const size_t nLength = strlen(FileInfo.fname);
+		if (!(FileInfo.fattrib & (AM_DIR | AM_HID | AM_SYS)) && FileInfo.fname[0] != '.' &&
+		    nLength > 5 && strcasecmp(FileInfo.fname + nLength - 5, ".wopl") == 0)
+		{
+			TBankFile& Entry = m_BankFiles[m_nBankFiles++];
+			Entry.Path.Format("%s/%s", BankFileDirectory, FileInfo.fname);
+			FileInfo.fname[nLength - 5] = '\0';
+			Entry.Name = FileInfo.fname;
+		}
+		Result = f_findnext(&Dir, &FileInfo);
+	}
+	f_closedir(&Dir);
+
+	// Alphabetical order, as the SoundFonts
+	for (int i = 1; i < m_nBankFiles; ++i)
+		for (int j = i; j > 0 && strcasecmp(m_BankFiles[j - 1].Name, m_BankFiles[j].Name) > 0; --j)
+		{
+			TBankFile Swap = m_BankFiles[j];
+			m_BankFiles[j] = m_BankFiles[j - 1];
+			m_BankFiles[j - 1] = Swap;
+		}
+
+	for (int i = 0; i < m_nBankFiles; ++i)
+		LOGNOTE("Bank %d: %s", m_nEmbeddedBanks + i, static_cast<const char*>(m_BankFiles[i].Path));
+}
+
+ADL_MIDIPlayer* COPL3Synth::CreatePlayer(int nBank) const
+{
+	if (nBank < m_nEmbeddedBanks)
+		return OPL3MIDI::NewPlayer(m_nSampleRate, m_nEmulator, m_nChips, nBank);
+
+	// A bank file, read whole into memory; libADLMIDI copies the instruments
+	const char* pPath = m_BankFiles[nBank - m_nEmbeddedBanks].Path;
+	FIL File;
+	if (f_open(&File, pPath, FA_READ) != FR_OK)
+	{
+		LOGERR("Cannot open %s", pPath);
+		return nullptr;
+	}
+
+	const FSIZE_t nSize = f_size(&File);
+	u8* pData = nSize > 0 && nSize <= MaxBankFileSize ? new u8[nSize] : nullptr;
+	UINT nRead = 0;
+	const bool bRead = pData && f_read(&File, pData, nSize, &nRead) == FR_OK && nRead == nSize;
+	f_close(&File);
+
+	ADL_MIDIPlayer* pPlayer = bRead ? OPL3MIDI::NewPlayer(m_nSampleRate, m_nEmulator, m_nChips, 0, pData, nSize) : nullptr;
+	delete[] pData;
+
+	if (!pPlayer)
+		LOGERR("%s is not a valid WOPL bank", pPath);
+	return pPlayer;
 }
 
 void COPL3Synth::HandleMIDIShortMessage(u32 nMessage)
@@ -183,32 +254,31 @@ bool COPL3Synth::SetBank(int nBank)
 	if (nBank < 0 || nBank >= GetBankCount())
 		return false;
 
-	m_Lock.Acquire();
-	const int nResult = adl_setBank(m_pPlayer, nBank);
-	m_Lock.Release();
-
-	if (nResult < 0)
-	{
-		LOGERR("Bank %d: %s", nBank, adl_errorInfo(m_pPlayer));
+	// A new player, built outside the lock (a file takes a moment to read)
+	ADL_MIDIPlayer* const pPlayer = CreatePlayer(nBank);
+	if (!pPlayer)
 		return false;
-	}
+
+	m_Lock.Acquire();
+	ADL_MIDIPlayer* const pOldPlayer = m_pPlayer;
+	m_pPlayer = pPlayer;
+	m_Lock.Release();
+	adl_close(pOldPlayer);
 
 	m_nBank = nBank;
 	m_MIDIMonitor.AllNotesOff();
+	m_MIDIMonitor.ResetControllers(false);
 	LOGNOTE("Bank %d: %s", m_nBank, GetBankName(m_nBank));
 	return true;
 }
 
-int COPL3Synth::GetBankCount()
-{
-	return adl_getBanksCount();
-}
-
-const char* COPL3Synth::GetBankName(int nBank)
+const char* COPL3Synth::GetBankName(int nBank) const
 {
 	if (nBank < 0 || nBank >= GetBankCount())
 		return "OPL3";
-	return adl_getBankNames()[nBank];
+	if (nBank < m_nEmbeddedBanks)
+		return adl_getBankNames()[nBank];
+	return m_BankFiles[nBank - m_nEmbeddedBanks].Name;
 }
 
 const char* COPL3Synth::GetEmulatorName() const

@@ -40,7 +40,9 @@ Planned as golem-1.1.0.
   `default_synth = opl3`; `[opl3]` options `bank`, `emulator`, `chips` and
   `gain`. Golem `SET_SYNTH` 2 (`.golem engine opl3`), status availability
   bit 2, `SET_PARAMETER` 5 for the bank (`.golem set bank`), and `SAVE` writes
-  the bank. Button 1 cycles through the available engines; button 2 selects
+  the bank. WOPL bank files in `SD:opl3/` follow the embedded banks (79
+  onwards, alphabetical, up to 127). Each bank change builds a new player, so
+  the sound does not depend on the banks used before. Button 1 cycles through the available engines; button 2 selects
   the next bank in OPL3 mode.
 
 ### Changed
