@@ -47,8 +47,8 @@ void CNextAudioInput::PutChunk(const u32* pBuffer, unsigned nChunkSize)
 
 void CNextAudioInput::LogStatus() const
 {
-	LOGNOTE("Next audio: %u frames received, ring %u/%u, %u overruns, %u underruns",
+	LOGNOTE("Next audio: %u frames received, ring %u/%u, %u overruns, %u underruns, %u chunks not from the Next",
 	        static_cast<unsigned>(m_Ring.Received()), static_cast<unsigned>(m_Ring.Level()),
 	        static_cast<unsigned>(RingFrames), static_cast<unsigned>(m_Ring.Overruns()),
-	        static_cast<unsigned>(m_Ring.Underruns()));
+	        static_cast<unsigned>(m_Ring.Underruns()), static_cast<unsigned>(m_Ring.InvalidChunks()));
 }
