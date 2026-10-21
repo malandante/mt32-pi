@@ -22,6 +22,7 @@ OBJS		:=	src/config.o \
 			src/midiparser.o \
 			src/mt32pi.o \
 			src/nextaudioinput.o \
+			src/diagaudio.o \
 			src/net/applemidi.o \
 			src/net/ftpdaemon.o \
 			src/net/ftpworker.o \

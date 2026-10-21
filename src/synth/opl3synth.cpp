@@ -27,6 +27,7 @@
 #include <strings.h>
 
 #include "config.h"
+#include "diagaudio.h"
 #include "lcd/ui.h"
 #include "synth/opl3midi.h"
 #include "synth/opl3synth.h"
@@ -203,8 +204,7 @@ void COPL3Synth::HandleMIDISysExMessage(const u8* pData, size_t nSize)
 	if (nSize == sizeof(GMSystemOn) && memcmp(pData, GMSystemOn, nSize) == 0)
 	{
 		// .golem reset after a stop: the capture first, then a new player
-		if (m_nPostSweepFrames != ~0u)
-			WriteCapture("GM System On");
+		WriteCapture("GM System On");
 		Rebuild();
 		return;
 	}
@@ -259,6 +259,20 @@ void COPL3Synth::WriteCapture(const char* pReason)
 		else
 			Line.Format("%u %02x %02x %02x\n", nMillis, static_cast<unsigned>(nMessage & 0xFF),
 			            static_cast<unsigned>((nMessage >> 8) & 0xFF), static_cast<unsigned>((nMessage >> 16) & 0xFF));
+		f_write(&File, static_cast<const char*>(Line), Line.GetLength(), &nWritten);
+	}
+	// One line per second of audio: time (ms, same base), synth render peak
+	// and zero crossings, output peak and zero crossings
+	Line.Format("# audio: ms synth_peak synth_crossings output_peak output_crossings (last %u s)\n",
+	            DiagAudio::nWindows < DiagAudio::WindowCount ? DiagAudio::nWindows : DiagAudio::WindowCount);
+	f_write(&File, static_cast<const char*>(Line), Line.GetLength(), &nWritten);
+	const unsigned nTotal = DiagAudio::nWindows;
+	const unsigned nShown = nTotal < DiagAudio::WindowCount ? nTotal : DiagAudio::WindowCount;
+	for (unsigned i = nTotal - nShown; i < nTotal; ++i)
+	{
+		const DiagAudio::TWindow& W = DiagAudio::Windows[i % DiagAudio::WindowCount];
+		Line.Format("# a %d %.6f %u %.6f %u\n", static_cast<int>(W.nTime - nBase) / 1000, W.nSynthPeak,
+		            static_cast<unsigned>(W.nSynthCrossings), W.nOutputPeak, static_cast<unsigned>(W.nOutputCrossings));
 		f_write(&File, static_cast<const char*>(Line), Line.GetLength(), &nWritten);
 	}
 	f_close(&File);

@@ -33,6 +33,7 @@
 #include "lcd/drivers/ssd1306.h"
 #include "lcd/ui.h"
 #include "mt32pi.h"
+#include "diagaudio.h"
 
 #define MT32_PI_NAME "mt32-pi"
 LOGMODULE(MT32_PI_NAME);
@@ -730,6 +731,7 @@ void CMT32Pi::AudioTask()
 		const size_t nWriteBytes = nFrames * nBytesPerFrame;
 
 		m_pCurrentSynth->Render(FloatBuffer, nFrames);
+		DiagAudio::Measure(FloatBuffer, nFrames, false, m_pConfig->AudioSampleRate);
 
 		// Loudness: a fresh limiter each time it is switched on, so no old
 		// audio is left in its look-ahead
@@ -748,6 +750,7 @@ void CMT32Pi::AudioTask()
 
 		if (m_pNextAudio)
 			m_pNextAudio->MixInto(FloatBuffer, nFrames, nNextInputGain);
+		DiagAudio::Measure(FloatBuffer, nFrames, true, m_pConfig->AudioSampleRate);
 
 		if (bReversedStereo)
 		{
