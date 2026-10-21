@@ -730,6 +730,8 @@ void CMT32Pi::AudioTask()
 	while (m_bRunning)
 	{
 		const size_t nFrames = nQueueSizeFrames - m_pSound->GetQueueFramesAvail();
+		if (nFrames >= nQueueSizeFrames)
+			DiagCapture::Underrun(nFrames);
 		const size_t nWriteBytes = nFrames * nBytesPerFrame;
 
 		m_pCurrentSynth->Render(FloatBuffer, nFrames);
