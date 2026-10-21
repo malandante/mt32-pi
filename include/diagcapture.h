@@ -21,6 +21,8 @@ namespace DiagCapture
 	// input (this one advances the frame count)
 	void Audio(const float* pBuffer, size_t nFrames, bool bOutput);
 	void ShortMessage(u32 nMessage);
+	// The output queue ran dry (an audible gap); nFree = frames it could take
+	void Underrun(unsigned nFree);
 	// True when the message is GM System On: the capture has been written
 	bool SysEx(const u8* pData, size_t nSize);
 }

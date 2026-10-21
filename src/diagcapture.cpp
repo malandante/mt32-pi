@@ -76,6 +76,18 @@ namespace DiagCapture
 		Event.Data[2] = (nMessage >> 16) & 0xFF;
 	}
 
+	void Underrun(unsigned nFree)
+	{
+		if (!s_Events || s_bFrozen)
+			return;
+		TEvent& Event = s_Events[s_nEvents++ % MaxEvents];
+		Event.nFrame = s_nFrame;
+		Event.nLength = 0;
+		Event.Data[0] = 0xFF;	// written as "underrun"
+		Event.Data[1] = nFree & 0xFF;
+		Event.Data[2] = (nFree >> 8) & 0xFF;
+	}
+
 	static void PutLE(u8* p, u32 v, int n)
 	{
 		for (int i = 0; i < n; ++i)
@@ -123,7 +135,10 @@ namespace DiagCapture
 			{
 				const TEvent& Event = s_Events[i % MaxEvents];
 				const int nFrame = static_cast<int>(Event.nFrame - nFirst);
-				if (Event.nLength == 0)
+				if (Event.nLength == 0 && Event.Data[0] == 0xFF)
+					Line.Format("%d underrun: queue empty, %u frames free\n", nFrame,
+					            static_cast<unsigned>(Event.Data[1] | Event.Data[2] << 8));
+				else if (Event.nLength == 0)
 					Line.Format("%d %02x %02x %02x\n", nFrame, Event.Data[0], Event.Data[1], Event.Data[2]);
 				else
 				{
