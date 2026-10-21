@@ -5,7 +5,7 @@
 include Config.mk
 
 .DEFAULT_GOAL=all
-.PHONY: submodules circle-stdlib mt32emu fluidsynth all clean veryclean
+.PHONY: submodules circle-stdlib mt32emu fluidsynth adlmidi all clean veryclean
 
 #
 # Functions to apply/reverse patches only if not completely applied/reversed already
@@ -133,9 +133,46 @@ $(FLUIDSYNTHBUILDDIR)/.done: $(CIRCLESTDLIBHOME)/.done
 	@touch $@
 
 #
+# Build libADLMIDI (OPL3): real-time synthesis only, Nuked and DOSBox
+# emulators, the embedded banks without the grey-zone ones
+#
+adlmidi: $(ADLMIDIBUILDDIR)/.done
+
+$(ADLMIDIBUILDDIR)/.done: $(CIRCLESTDLIBHOME)/.done
+	@CFLAGS="$(CFLAGS_EXTERNAL) -DDOSBOX_NO_MUTEX" \
+	CXXFLAGS="$(CFLAGS_EXTERNAL) -DDOSBOX_NO_MUTEX" \
+	cmake -B $(ADLMIDIBUILDDIR) \
+		 $(CMAKE_TOOLCHAIN_FLAGS) \
+		 -DCMAKE_C_FLAGS_RELEASE="-O3" \
+		 -DCMAKE_CXX_FLAGS_RELEASE="-O3" \
+		 -DCMAKE_BUILD_TYPE=Release \
+		 -DlibADLMIDI_STATIC=ON \
+		 -DlibADLMIDI_SHARED=OFF \
+		 -DENABLE_FPIC=OFF \
+		 -DWITH_MIDI_SEQUENCER=OFF \
+		 -DWITH_EMBEDDED_BANKS=ON \
+		 -DBUILD_NO_GREY_BANKS=ON \
+		 -DWITH_XMI_SUPPORT=OFF \
+		 -DWITH_HQ_RESAMPLER=OFF \
+		 -DUSE_NUKED_EMULATOR=ON \
+		 -DUSE_DOSBOX_EMULATOR=ON \
+		 -DUSE_OPAL_EMULATOR=OFF \
+		 -DUSE_JAVA_EMULATOR=OFF \
+		 -DUSE_ESFMU_EMULATOR=OFF \
+		 -DUSE_MAME_EMULATOR=OFF \
+		 -DUSE_YMFM_EMULATOR=OFF \
+		 -DUSE_NUKED_OPL2_LLE_EMULATOR=OFF \
+		 -DUSE_NUKED_OPL3_LLE_EMULATOR=OFF \
+		 -DUSE_HW_SERIAL=OFF \
+		 $(ADLMIDIHOME) \
+		 >/dev/null
+	@cmake --build $(ADLMIDIBUILDDIR) --target ADLMIDI_static
+	@touch $@
+
+#
 # Build kernel itself
 #
-all: circle-stdlib mt32emu fluidsynth
+all: circle-stdlib mt32emu fluidsynth adlmidi
 	@$(MAKE) -f Kernel.mk $(KERNEL).img $(KERNEL).hex
 
 #
@@ -163,3 +200,6 @@ mrproper: clean
 
 # Clean FluidSynth
 	@$(RM) -r $(FLUIDSYNTHBUILDDIR)
+
+# Clean libADLMIDI
+	@$(RM) -r $(ADLMIDIBUILDDIR)

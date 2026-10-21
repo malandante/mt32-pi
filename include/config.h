@@ -37,7 +37,12 @@ class CConfig
 public:
 	#define ENUM_SYSTEMDEFAULTSYNTH(ENUM) \
 		ENUM(MT32, mt32)                  \
-		ENUM(SoundFont, soundfont)
+		ENUM(SoundFont, soundfont)        \
+		ENUM(OPL3, opl3)
+
+	#define ENUM_OPL3EMULATOR(ENUM) \
+		ENUM(Nuked, nuked)          \
+		ENUM(DOSBox, dosbox)
 
 	#define ENUM_AUDIOOUTPUTDEVICE(ENUM) \
 		ENUM(PWM, pwm)                   \
@@ -81,6 +86,7 @@ public:
 	CONFIG_ENUM(TLCDType, ENUM_LCDTYPE);
 	CONFIG_ENUM(TNetworkMode, ENUM_NETWORKMODE);
 	CONFIG_ENUM(TMIDIUSBOut, ENUM_MIDIUSBOUT);
+	CONFIG_ENUM(TOPL3Emulator, ENUM_OPL3EMULATOR);
 
 	CConfig();
 	bool Initialize(const char* pPath);
@@ -109,6 +115,7 @@ public:
 	static bool ParseOption(const char* pString, TLCDMirror* pOut);
 	static bool ParseOption(const char* pString, TNetworkMode* pOut);
 	static bool ParseOption(const char* pString, TMIDIUSBOut* pOut);
+	static bool ParseOption(const char* pString, TOPL3Emulator* pOut);
 
 private:
 	static int INIHandler(void* pUser, const char* pSection, const char* pName, const char* pValue);
