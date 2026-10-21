@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Planned as golem-1.1.0.
+
+### Added
+
+- USB MIDI output (`[midi] usb_out = off|on|bridge`): MIDI from the GPIO
+  serial port (the Next) and network MIDI also goes to up to four USB MIDI
+  devices; `bridge` keeps the built-in synth silent. Set from the Next with the
+  Golem command `SET_USB_OUT` (`.golem usb`); `READY` carries the mode and the
+  device count.
+- `[midi] usb_in_thru`: MIDI from USB devices (a keyboard) is also forwarded to
+  the USB outputs.
+- Golem command `SET_PARAMETER` (0x05, capability bit 5): payload parameter and
+  value, 0x7F only reports; `READY` carries both. Parameters: 0 master volume
+  0-100 (what the buttons and the encoder change), 1 FluidSynth reverb and
+  chorus on/off, 2 MT-32 MIDI channels standard/alternate, 3 USB input thru
+  on/off. Set from the Next with `.golem set`. Settings last until power-off.
+
+### Changed
+
+- GPIO serial MIDI stays enabled when USB MIDI devices are attached (upstream
+  turned it off), so the Next and a USB keyboard play the synth together.
+- USB serial and USB MIDI/Pisound input each have their own MIDI parser.
+- Golem requests arriving from USB are ignored (replies always go to the GPIO
+  serial port).
+
+### Fixed
+
+- MT-32 MIDI channel assignment and master volume survive an MT-32 reset
+  SysEx and a ROM set change. Before, `midi_channels = alternate` and the
+  volume set with the buttons or encoder went back to the factory values as
+  soon as a game or player sent the reset.
+- The audio task converted each chunk into a zero-length array
+  (`n + bI2S ? 0 : 1` parses as `(n + bI2S) ? 0 : 1`), writing over its
+  float buffer on the stack. Present upstream since 2022.
+
+### Tested
+
+- Raspberry Pi 4 and Pi 3 on the ZX Spectrum Next: `.golem status`, MT-32 and
+  General MIDI songs, `.golem usb` with no device; Roland UM-ONE with a
+  JV-1010 (`off`, `on`, `bridge`); a DIN keyboard through the UM-ONE playing
+  FluidSynth.
+
+### Note
+
+- Through the Next's minijack, quiet sounds crackle; through HDMI they are
+  clean. It is the Next's analogue converter, the same with official mt32-pi.
+
 ## [golem-1.0.1] - 2026-10-08
 
 ### Fixed
