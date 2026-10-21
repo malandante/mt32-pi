@@ -173,6 +173,40 @@ static int Checks()
 		      "a cut WOPL file is refused");
 	}
 
+	// A slow release (bank 58, program 107) is cut by the stop sweep of All
+	// Sound Off on all 16 channels, as the kernel does it (adl_reset)
+	{
+		ADL_MIDIPlayer* p = NewPlayer(58);
+		OPL3MIDI::TSoundOffSweep Sweep;
+		auto Send = [&](uint32_t m) {
+			OPL3MIDI::ShortMessage(p, m);
+			if (Sweep.Message(m))
+				adl_reset(p);
+		};
+		Send(Msg(0xC0, 107));
+		Send(Msg(0x90, 60, 100));
+		Run(p, 500);
+		Send(Msg(0x80, 60, 0));
+		Run(p, 1000);
+		const float nRinging = Run(p, 200);
+		for (uint8_t c = 0; c < 16; ++c)
+		{
+			Send(Msg(0xB0 | c, 64, 0));
+			Send(Msg(0xB0 | c, 123, 0));
+			if (c < 15)
+				Send(Msg(0xB0 | c, 120, 0));
+		}
+		const float nPartSweep = Run(p, 200);
+		Send(Msg(0xBF, 120, 0));
+		Run(p, 50);
+		Check(nRinging > 1e-3f && nPartSweep > 1e-4f && Run(p, 200) < 1e-5f,
+		      "the stop sweep silences a long release");
+		Send(Msg(0xC0, 0));
+		Send(Msg(0x90, 60, 100));
+		Check(Run(p, 300) > 0.02f, "and the player plays again");
+		adl_close(p);
+	}
+
 	// A bank change builds a new player, so the sound does not depend on the
 	// banks used before: two new players for bank 72 play the same samples
 	{

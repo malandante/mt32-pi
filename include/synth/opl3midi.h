@@ -115,6 +115,35 @@ namespace OPL3MIDI
 		}
 	}
 
+	// All Sound Off (CC 120) on all 16 channels, as a player sends when it
+	// stops (the Golem client sends CC 64, 123 and 120 on each). libADLMIDI
+	// then still lets voices already released ring out, and some instruments
+	// release for many seconds (bank 58, program 107: about 10 s). When the
+	// sweep completes, the caller resets the player (adl_reset), which
+	// silences every chip channel. Any Note On starts a new sweep.
+	struct TSoundOffSweep
+	{
+		uint16_t nChannels = 0;
+
+		// True when this message completes a sweep
+		bool Message(uint32_t nMessage)
+		{
+			const uint8_t nStatus = nMessage & 0xF0;
+			if (nStatus == 0x90 && ((nMessage >> 16) & 0x7F))
+				nChannels = 0;
+			else if (nStatus == 0xB0 && ((nMessage >> 8) & 0x7F) == 120)
+			{
+				nChannels |= 1u << (nMessage & 0x0F);
+				if (nChannels == 0xFFFF)
+				{
+					nChannels = 0;
+					return true;
+				}
+			}
+			return false;
+		}
+	};
+
 	// Interleaved stereo floats, scaled by nGain and kept within -1..1 (the
 	// audio task converts to integers without clipping). Returns the peak
 	// before clipping, so the caller can tell silence from sound.

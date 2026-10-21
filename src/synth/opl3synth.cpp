@@ -164,6 +164,8 @@ void COPL3Synth::HandleMIDIShortMessage(u32 nMessage)
 {
 	m_Lock.Acquire();
 	OPL3MIDI::ShortMessage(m_pPlayer, nMessage);
+	if (m_SoundOffSweep.Message(nMessage))
+		adl_reset(m_pPlayer);
 	m_Lock.Release();
 
 	// Note On from silence: active straight away for the power-save logic
