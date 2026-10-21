@@ -28,6 +28,7 @@ OBJS		:=	src/config.o \
 			src/mt32pi.o \
 			src/mt32pi_params.o \
 			src/nextaudioinput.o \
+			src/diagcapture.o \
 			src/net/applemidi.o \
 			src/net/ftpdaemon.o \
 			src/net/ftpworker.o \
