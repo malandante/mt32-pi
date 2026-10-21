@@ -28,7 +28,7 @@ namespace DiagCapture
 	static unsigned s_nSampleRate = 48000;
 	static volatile u32 s_nFrame = 0;	// frames written in total
 	static volatile bool s_bFrozen = false;
-	static TEvent s_Events[MaxEvents];
+	static TEvent* s_Events = nullptr;	// on the heap: 650 KB in BSS overran the kernel's 2 MB
 	static unsigned s_nEvents = 0;
 
 	static s16 ToS16(float x)
@@ -42,8 +42,10 @@ namespace DiagCapture
 	{
 		s_nSampleRate = nSampleRate;
 		s_nFrames = nSampleRate * Seconds;
-		s_pAudio = new s16[s_nFrames * 4];
-		memset(s_pAudio, 0, s_nFrames * 4 * sizeof(s16));
+		s_Events = new TEvent[MaxEvents];
+		s16* pAudio = new s16[s_nFrames * 4];
+		memset(pAudio, 0, s_nFrames * 4 * sizeof(s16));
+		s_pAudio = pAudio;
 		LOGNOTE("Audio capture: %u s ready", Seconds);
 	}
 
@@ -64,7 +66,7 @@ namespace DiagCapture
 
 	void ShortMessage(u32 nMessage)
 	{
-		if (s_bFrozen || (nMessage & 0xFF) >= 0xF8)	// no clock or active sensing
+		if (!s_Events || s_bFrozen || (nMessage & 0xFF) >= 0xF8)	// no clock or active sensing
 			return;
 		TEvent& Event = s_Events[s_nEvents++ % MaxEvents];
 		Event.nFrame = s_nFrame;
@@ -82,6 +84,8 @@ namespace DiagCapture
 
 	static void Write()
 	{
+		if (!s_pAudio)
+			return;
 		s_bFrozen = true;
 		const u32 nEnd = s_nFrame;
 		const u32 nCount = nEnd < s_nFrames ? nEnd : s_nFrames;
@@ -150,7 +154,7 @@ namespace DiagCapture
 			Write();
 			return true;
 		}
-		if (s_bFrozen)
+		if (!s_Events || s_bFrozen)
 			return false;
 		TEvent& Event = s_Events[s_nEvents++ % MaxEvents];
 		Event.nFrame = s_nFrame;
