@@ -174,14 +174,17 @@ static int Checks()
 	}
 
 	// A slow release (bank 58, program 107) is cut by the stop sweep of All
-	// Sound Off on all 16 channels, as the kernel does it (adl_reset)
+	// Sound Off on all 16 channels, as the kernel does it (a new player)
 	{
 		ADL_MIDIPlayer* p = NewPlayer(58);
 		OPL3MIDI::TSoundOffSweep Sweep;
 		auto Send = [&](uint32_t m) {
 			OPL3MIDI::ShortMessage(p, m);
 			if (Sweep.Message(m))
-				adl_reset(p);
+			{
+				adl_close(p);	// as COPL3Synth::Rebuild
+				p = NewPlayer(58);
+			}
 		};
 		Send(Msg(0xC0, 107));
 		Send(Msg(0x90, 60, 100));

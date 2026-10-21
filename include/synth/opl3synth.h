@@ -71,6 +71,7 @@ private:
 
 	void ScanBankFiles();
 	ADL_MIDIPlayer* CreatePlayer(int nBank) const;
+	void Rebuild();
 
 	ADL_MIDIPlayer* m_pPlayer;
 	int m_nEmulator;

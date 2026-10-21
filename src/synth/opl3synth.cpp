@@ -164,9 +164,14 @@ void COPL3Synth::HandleMIDIShortMessage(u32 nMessage)
 {
 	m_Lock.Acquire();
 	OPL3MIDI::ShortMessage(m_pPlayer, nMessage);
-	if (m_SoundOffSweep.Message(nMessage))
-		adl_reset(m_pPlayer);
+	const bool bStopped = m_SoundOffSweep.Message(nMessage);
 	m_Lock.Release();
+
+	// The stop sweep: a new player, as a bank change makes. adl_reset was not
+	// enough on hardware (a note kept sounding after a stop); a bank change
+	// always silenced it.
+	if (bStopped)
+		Rebuild();
 
 	// Note On from silence: active straight away for the power-save logic
 	if ((nMessage & 0xF0) == 0x90 && ((nMessage >> 16) & 0x7F))
@@ -177,10 +182,32 @@ void COPL3Synth::HandleMIDIShortMessage(u32 nMessage)
 
 void COPL3Synth::HandleMIDISysExMessage(const u8* pData, size_t nSize)
 {
-	// GM/GS/XG resets, master volume and the like
+	// GM System On (.golem reset, and play before each song): a new player,
+	// so nothing from the previous song is left on the chip
+	const u8 GMSystemOn[] = {0xF0, 0x7E, 0x7F, 0x09, 0x01, 0xF7};
+	if (nSize == sizeof(GMSystemOn) && memcmp(pData, GMSystemOn, nSize) == 0)
+	{
+		Rebuild();
+		return;
+	}
+
+	// GS/XG resets, master volume and the like
 	m_Lock.Acquire();
 	adl_rt_systemExclusive(m_pPlayer, pData, nSize);
 	m_Lock.Release();
+}
+
+void COPL3Synth::Rebuild()
+{
+	ADL_MIDIPlayer* const pPlayer = CreatePlayer(m_nBank);
+	if (!pPlayer)
+		return;
+
+	m_Lock.Acquire();
+	ADL_MIDIPlayer* const pOldPlayer = m_pPlayer;
+	m_pPlayer = pPlayer;
+	m_Lock.Release();
+	adl_close(pOldPlayer);
 }
 
 void COPL3Synth::AllSoundOff()
@@ -264,10 +291,10 @@ bool COPL3Synth::SetBank(int nBank)
 	m_Lock.Acquire();
 	ADL_MIDIPlayer* const pOldPlayer = m_pPlayer;
 	m_pPlayer = pPlayer;
+	m_nBank = nBank;
 	m_Lock.Release();
 	adl_close(pOldPlayer);
 
-	m_nBank = nBank;
 	m_MIDIMonitor.AllNotesOff();
 	m_MIDIMonitor.ResetControllers(false);
 	LOGNOTE("Bank %d: %s", m_nBank, GetBankName(m_nBank));

@@ -119,8 +119,8 @@ namespace OPL3MIDI
 	// stops (the Golem client sends CC 64, 123 and 120 on each). libADLMIDI
 	// then still lets voices already released ring out, and some instruments
 	// release for many seconds (bank 58, program 107: about 10 s). When the
-	// sweep completes, the caller resets the player (adl_reset), which
-	// silences every chip channel. Any Note On starts a new sweep.
+	// sweep completes, the caller makes a new player (adl_reset was not enough
+	// on hardware). Any Note On starts a new sweep.
 	struct TSoundOffSweep
 	{
 		uint16_t nChannels = 0;
