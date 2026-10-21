@@ -56,6 +56,7 @@ public:
 	// the config and effects profile, also after a SoundFont change.
 	void SetEffects(bool bEnabled);
 	bool GetEffects() const { return m_bEffects; }
+	bool HasEffectsSet() const { return m_bEffectsSet; }
 	CSoundFontManager& GetSoundFontManager() { return m_SoundFontManager; }
 
 private:
