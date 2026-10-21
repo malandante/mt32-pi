@@ -46,8 +46,9 @@ Planned as golem-1.1.0.
   the next bank in OPL3 mode.
 
 - Loudness (`[golem] loudness`, `loudness_gain`; Golem `SET_PARAMETER` 6,
-  `.golem set loud`): the synth's output is raised by a fixed gain (2.0 by
-  default) through a stereo-linked look-ahead limiter (64 frames, release
+  `.golem set loud`): the synth's output is raised by a fixed gain (4.0 by
+  default, chosen by ear with BASS-NX; a chord measured with `REG 44`
+  stays far below full scale at 3.0) through a stereo-linked look-ahead limiter (64 frames, release
   200 ms, soft clip above 0.95), so the music is louder in the Next's mix
   without clipping. `SAVE` writes it. Host test: exact gain below the
   threshold, settles at -1 dB, catches sudden peaks, recovers, keeps the
