@@ -20,6 +20,7 @@
 //
 
 #include <circle/logger.h>
+#include <circle/timer.h>
 #include <circle/util.h>
 #include <fatfs/ff.h>
 #include <string.h>
@@ -51,7 +52,13 @@ COPL3Synth::COPL3Synth(unsigned int nSampleRate)
 	  m_nVolume(100),
 	  m_nGain(1.0f),
 	  m_bActive(false),
-	  m_nSilentFrames(0)
+	  m_nSilentFrames(0),
+	  m_nCaptureCount(0),
+	  m_nSweepTime(0),
+	  m_nPostSweepFrames(~0u),
+	  m_nPostSweepPeak(0.0f),
+	  m_nPostSweepCrossings(0),
+	  m_nLastSample(0.0f)
 {
 }
 
@@ -162,16 +169,23 @@ ADL_MIDIPlayer* COPL3Synth::CreatePlayer(int nBank) const
 
 void COPL3Synth::HandleMIDIShortMessage(u32 nMessage)
 {
+	Capture(nMessage);
+
 	m_Lock.Acquire();
 	OPL3MIDI::ShortMessage(m_pPlayer, nMessage);
 	const bool bStopped = m_SoundOffSweep.Message(nMessage);
 	m_Lock.Release();
 
-	// The stop sweep: a new player, as a bank change makes. adl_reset was not
-	// enough on hardware (a note kept sounding after a stop); a bank change
-	// always silenced it.
+	// Diagnostic build: no new player at the stop sweep, so a note left
+	// sounding stays, and the render measures it 2-4 s later
 	if (bStopped)
-		Rebuild();
+	{
+		m_nSweepTime = CTimer::GetClockTicks();
+		m_nPostSweepPeak = 0.0f;
+		m_nPostSweepCrossings = 0;
+		m_nPostSweepFrames = 0;
+		LOGNOTE("Stop sweep at %u us", static_cast<unsigned>(m_nSweepTime));
+	}
 
 	// Note On from silence: active straight away for the power-save logic
 	if ((nMessage & 0xF0) == 0x90 && ((nMessage >> 16) & 0x7F))
@@ -185,8 +199,12 @@ void COPL3Synth::HandleMIDISysExMessage(const u8* pData, size_t nSize)
 	// GM System On (.golem reset, and play before each song): a new player,
 	// so nothing from the previous song is left on the chip
 	const u8 GMSystemOn[] = {0xF0, 0x7E, 0x7F, 0x09, 0x01, 0xF7};
+	Capture(0xF0 | static_cast<u32>(nSize) << 8);
 	if (nSize == sizeof(GMSystemOn) && memcmp(pData, GMSystemOn, nSize) == 0)
 	{
+		// .golem reset after a stop: the capture first, then a new player
+		if (m_nPostSweepFrames != ~0u)
+			WriteCapture("GM System On");
 		Rebuild();
 		return;
 	}
@@ -195,6 +213,58 @@ void COPL3Synth::HandleMIDISysExMessage(const u8* pData, size_t nSize)
 	m_Lock.Acquire();
 	adl_rt_systemExclusive(m_pPlayer, pData, nSize);
 	m_Lock.Release();
+}
+
+void COPL3Synth::Capture(u32 nMessage)
+{
+	TCapture& Entry = m_Capture[m_nCaptureCount++ % CaptureSize];
+	Entry.nTime = CTimer::GetClockTicks();
+	Entry.nMessage = nMessage;
+}
+
+// SD:opl3cap.txt: a header, then one line per message, oldest first:
+// "milliseconds status data1 data2" in hex, as tests/smf_events.py prints, or
+// "milliseconds f0 length" for a SysEx message. Overwritten each time.
+void COPL3Synth::WriteCapture(const char* pReason)
+{
+	FIL File;
+	if (f_open(&File, "SD:opl3cap.txt", FA_WRITE | FA_CREATE_ALWAYS) != FR_OK)
+	{
+		LOGERR("Cannot write SD:opl3cap.txt");
+		return;
+	}
+
+	const bool bMeasured = m_nPostSweepFrames >= m_nSampleRate * 4;
+	CString Line;
+	Line.Format("# opl3 capture (%s): bank %d %s, %s, %d chip(s), gain %.2f, volume %d\n"
+	            "# 2-4 s after the stop sweep: %s peak %.6f, %u zero crossings/2 s\n"
+	            "# %u messages received, the last %u below; sweep at %u us\n",
+	            pReason, m_nBank, GetBankName(m_nBank), GetEmulatorName(), m_nChips, m_nGain, m_nVolume,
+	            bMeasured ? "" : "(incomplete)", m_nPostSweepPeak, m_nPostSweepCrossings,
+	            m_nCaptureCount, m_nCaptureCount < CaptureSize ? m_nCaptureCount : CaptureSize,
+	            static_cast<unsigned>(m_nSweepTime));
+	UINT nWritten;
+	f_write(&File, static_cast<const char*>(Line), Line.GetLength(), &nWritten);
+
+	const unsigned nCount = m_nCaptureCount < CaptureSize ? m_nCaptureCount : CaptureSize;
+	const unsigned nFirst = m_nCaptureCount - nCount;
+	const u32 nBase = m_Capture[nFirst % CaptureSize].nTime;
+	for (unsigned i = 0; i < nCount; ++i)
+	{
+		const TCapture& Entry = m_Capture[(nFirst + i) % CaptureSize];
+		const unsigned nMillis = (Entry.nTime - nBase) / 1000;
+		const u32 nMessage = Entry.nMessage;
+		if ((nMessage & 0xFF) == 0xF0)
+			Line.Format("%u f0 %u\n", nMillis, static_cast<unsigned>(nMessage >> 8));
+		else
+			Line.Format("%u %02x %02x %02x\n", nMillis, static_cast<unsigned>(nMessage & 0xFF),
+			            static_cast<unsigned>((nMessage >> 8) & 0xFF), static_cast<unsigned>((nMessage >> 16) & 0xFF));
+		f_write(&File, static_cast<const char*>(Line), Line.GetLength(), &nWritten);
+	}
+	f_close(&File);
+
+	LOGNOTE("Capture written: %u messages, post-sweep peak %.6f", nCount, m_nPostSweepPeak);
+	m_nPostSweepFrames = ~0u;
 }
 
 void COPL3Synth::Rebuild()
@@ -229,6 +299,31 @@ size_t COPL3Synth::Render(float* pOutBuffer, size_t nFrames)
 	m_Lock.Acquire();
 	const float nPeak = OPL3MIDI::Render(m_pPlayer, pOutBuffer, nFrames, m_nGain * m_nVolume / 100.0f);
 	m_Lock.Release();
+
+	// Diagnostic: peak and zero crossings (left) from 2 to 4 s after a sweep
+	if (m_nPostSweepFrames != ~0u)
+	{
+		const unsigned nStart = m_nSampleRate * 2, nEnd = m_nSampleRate * 4;
+		if (m_nPostSweepFrames >= nStart && m_nPostSweepFrames < nEnd)
+		{
+			float nMax = m_nPostSweepPeak;
+			unsigned nCrossings = m_nPostSweepCrossings;
+			for (size_t i = 0; i < nFrames; ++i)
+			{
+				const float nSample = pOutBuffer[i * 2];
+				const float nMagnitude = nSample < 0.0f ? -nSample : nSample;
+				if (nMagnitude > nMax)
+					nMax = nMagnitude;
+				if ((nSample > 0.0f) != (m_nLastSample > 0.0f))
+					++nCrossings;
+				m_nLastSample = nSample;
+			}
+			m_nPostSweepPeak = nMax;
+			m_nPostSweepCrossings = nCrossings;
+		}
+		if (m_nPostSweepFrames < nEnd)
+			m_nPostSweepFrames += nFrames;
+	}
 
 	// Active until half a second of silence
 	if (nPeak > SilencePeak)

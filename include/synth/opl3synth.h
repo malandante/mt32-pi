@@ -73,6 +73,24 @@ private:
 	ADL_MIDIPlayer* CreatePlayer(int nBank) const;
 	void Rebuild();
 
+	// Diagnostic capture (diag/opl3-capture): the last MIDI messages with
+	// their arrival time, and what is left 2-4 s after a stop sweep
+	struct TCapture
+	{
+		u32 nTime;	// microseconds
+		u32 nMessage;	// short message; SysEx as 0xF0 | length << 8
+	};
+	static constexpr unsigned CaptureSize = 16384;
+	void Capture(u32 nMessage);
+	void WriteCapture(const char* pReason);
+	TCapture m_Capture[CaptureSize];
+	unsigned m_nCaptureCount;
+	volatile u32 m_nSweepTime;
+	volatile unsigned m_nPostSweepFrames;
+	volatile float m_nPostSweepPeak;
+	volatile unsigned m_nPostSweepCrossings;
+	float m_nLastSample;
+
 	ADL_MIDIPlayer* m_pPlayer;
 	int m_nEmulator;
 	int m_nChips;
