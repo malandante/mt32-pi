@@ -70,6 +70,9 @@ Planned as golem-1.1.0.
 
 ### Fixed
 
+- OPL3: a file in `opl3` with the `.wopl` name that is not a bank (a web
+  page saved by mistake) is left out at boot. Before, it took a bank number
+  and selecting it made the Golem client time out while the Pi read it.
 - OPL3: a faint whistle or hum after a song, at the pitch of its last notes.
   A voice at rest still outputs -1 instead of 0 in the negative half of its
   sine, at the last pitch (the real chip does the same, and Nuked OPL3

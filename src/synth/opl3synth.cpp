@@ -96,6 +96,32 @@ bool COPL3Synth::Initialize()
 	return true;
 }
 
+// A WOPL file starts with this magic. Checked when scanning, so a file that
+// is not a bank (a web page saved with the .wopl name, say) is never listed:
+// selecting it failed only after reading the whole file, slowly enough on
+// the Pi for the Golem client to time out.
+static bool IsBankFile(const FILINFO& FileInfo)
+{
+	static const char Magic[] = "WOPL3-BANK";	// and its terminating zero
+	if (FileInfo.fsize < sizeof(Magic) || FileInfo.fsize > MaxBankFileSize)
+		return false;
+
+	CString Path;
+	Path.Format("%s/%s", BankFileDirectory, FileInfo.fname);
+	FIL File;
+	if (f_open(&File, Path, FA_READ) != FR_OK)
+		return false;
+	char Header[sizeof(Magic)];
+	UINT nRead = 0;
+	const bool bOk = f_read(&File, Header, sizeof(Header), &nRead) == FR_OK && nRead == sizeof(Header) &&
+	                 memcmp(Header, Magic, sizeof(Magic)) == 0;
+	f_close(&File);
+
+	if (!bOk)
+		LOGWARN("%s is not a WOPL bank, left out", static_cast<const char*>(Path));
+	return bOk;
+}
+
 void COPL3Synth::ScanBankFiles()
 {
 	DIR Dir;
@@ -108,7 +134,8 @@ void COPL3Synth::ScanBankFiles()
 	{
 		const size_t nLength = strlen(FileInfo.fname);
 		if (!(FileInfo.fattrib & (AM_DIR | AM_HID | AM_SYS)) && FileInfo.fname[0] != '.' &&
-		    nLength > 5 && strcasecmp(FileInfo.fname + nLength - 5, ".wopl") == 0)
+		    nLength > 5 && strcasecmp(FileInfo.fname + nLength - 5, ".wopl") == 0 &&
+		    IsBankFile(FileInfo))
 		{
 			TBankFile& Entry = m_BankFiles[m_nBankFiles++];
 			Entry.Path.Format("%s/%s", BankFileDirectory, FileInfo.fname);
