@@ -31,6 +31,7 @@
 
 #include <adlmidi.h>
 
+#include "synth/opl3midi.h"
 #include "synth/synthbase.h"
 
 class COPL3Synth : public CSynthBase
@@ -70,6 +71,7 @@ private:
 
 	void ScanBankFiles();
 	ADL_MIDIPlayer* CreatePlayer(int nBank) const;
+	void Rebuild();
 
 	ADL_MIDIPlayer* m_pPlayer;
 	int m_nEmulator;
@@ -82,6 +84,7 @@ private:
 	float m_nGain;
 	volatile bool m_bActive;
 	unsigned int m_nSilentFrames;
+	OPL3MIDI::TSoundOffSweep m_SoundOffSweep;
 };
 
 #endif

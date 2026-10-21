@@ -88,8 +88,7 @@ bool CMT32Synth::Initialize()
 	if (!m_pSynth->open(*m_pControlROMImage, *m_pPCMROMImage))
 		return false;
 
-	m_pSynth->setOutputGain(m_nGain);
-	m_pSynth->setReverbOutputGain(m_nReverbGain);
+	ApplyOutputGain();
 
 	if (m_ResamplerQuality != TResamplerQuality::None)
 	{
@@ -134,10 +133,36 @@ void CMT32Synth::HandleMIDISysExMessage(const u8* pData, size_t nSize)
 {
 	m_pSynth->playSysex(pData, nSize);
 
-	// The reset restores the factory channels and volume; queue the kept
-	// ones right behind it so the notes that follow already use them.
-	if (IsResetSysEx(pData, nSize))
+	// The reset restores the factory channels; queue the kept ones right
+	// behind it so the notes that follow already use them. A song (or game)
+	// that writes the channel assignment itself, as Sierra and LucasArts
+	// drivers do, gets the alternate map back right after it too.
+	if (IsResetSysEx(pData, nSize) ||
+	    (m_MIDIChannels == TMIDIChannels::Alternate && WritesMIDIChannels(pData, nSize)))
 		QueueKeptSettings();
+}
+
+// Roland DT1 to the MT-32 whose data covers part of the MIDI channel
+// assignment (system area 10 00 0D-15)
+bool CMT32Synth::WritesMIDIChannels(const u8* pData, size_t nSize)
+{
+	if (nSize < 11 || pData[1] != 0x41 || (pData[2] & 0xF0) != 0x10 || pData[3] != 0x16 || pData[4] != 0x12)
+		return false;
+
+	const u32 nStart  = pData[5] << 14 | pData[6] << 7 | pData[7];
+	const u32 nLength = nSize - 10;	// F0 41 dd 16 12 a a a ... sum F7
+	const u32 nFirst  = 0x10 << 14 | 0x0D;
+	const u32 nLast   = 0x10 << 14 | 0x15;
+	return nStart <= nLast && nStart + nLength > nFirst;
+}
+
+// The master volume (buttons, encoder, Golem SET_PARAMETER) scales the output,
+// so a song's own MT-32 master volume SysEx cannot undo it
+void CMT32Synth::ApplyOutputGain()
+{
+	const float nScale = m_nMasterVolume / 100.0f;
+	m_pSynth->setOutputGain(m_nGain * nScale);
+	m_pSynth->setReverbOutputGain(m_nReverbGain * nScale);
 }
 
 // Roland DT1 to the MT-32 reset area: F0 41 dd 16 12 7F ...
@@ -156,12 +181,6 @@ void CMT32Synth::ApplyKeptSettings()
 {
 	if (m_MIDIChannels == TMIDIChannels::Alternate)
 		m_pSynth->writeSysex(0x10, AlternateMIDIChannelsSysEx, sizeof(AlternateMIDIChannelsSysEx));
-
-	if (m_nMasterVolume != 100)
-	{
-		const u8 SetVolumeSysEx[] = { 0x10, 0x00, 0x16, m_nMasterVolume };
-		m_pSynth->writeSysex(0x10, SetVolumeSysEx, sizeof(SetVolumeSysEx));
-	}
 }
 
 // Queued: in order with the MIDI stream, behind a reset
@@ -169,17 +188,11 @@ void CMT32Synth::QueueKeptSettings()
 {
 	if (m_MIDIChannels == TMIDIChannels::Alternate)
 		QueueRolandWrite(AlternateMIDIChannelsSysEx, sizeof(AlternateMIDIChannelsSysEx));
-
-	if (m_nMasterVolume != 100)
-	{
-		const u8 SetVolumeSysEx[] = { 0x10, 0x00, 0x16, m_nMasterVolume };
-		QueueRolandWrite(SetVolumeSysEx, sizeof(SetVolumeSysEx));
-	}
 }
 
 void CMT32Synth::QueueRolandWrite(const u8* pAddressAndData, size_t nSize)
 {
-	u8 Message[16];
+	u8 Message[24];	// the channel map is 3 + 9 bytes: 19 with the frame
 	if (nSize + 7 > sizeof(Message))
 		return;
 
@@ -214,8 +227,7 @@ void CMT32Synth::AllSoundOff()
 void CMT32Synth::SetMasterVolume(u8 nVolume)
 {
 	m_nMasterVolume = nVolume;
-	const u8 SetVolumeSysEx[] = { 0x10, 0x00, 0x16, nVolume };
-	m_pSynth->writeSysex(0x10, SetVolumeSysEx, sizeof(SetVolumeSysEx));
+	ApplyOutputGain();
 }
 
 size_t CMT32Synth::Render(s16* pOutBuffer, size_t nFrames)
@@ -319,8 +331,7 @@ bool CMT32Synth::SwitchROMSet(TMT32ROMSet ROMSet)
 	m_Lock.Acquire();
 	m_pSynth->close();
 	assert(m_pSynth->open(*pControlROMImage, *pPCMROMImage));
-	m_pSynth->setOutputGain(m_nGain);
-	m_pSynth->setReverbOutputGain(m_nReverbGain);
+	ApplyOutputGain();
 	ApplyKeptSettings();
 	m_Lock.Release();
 

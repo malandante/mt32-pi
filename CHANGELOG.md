@@ -46,8 +46,9 @@ Planned as golem-1.1.0.
   the next bank in OPL3 mode.
 
 - Loudness (`[golem] loudness`, `loudness_gain`; Golem `SET_PARAMETER` 6,
-  `.golem set loud`): the synth's output is raised by a fixed gain (2.0 by
-  default) through a stereo-linked look-ahead limiter (64 frames, release
+  `.golem set loud`): the synth's output is raised by a fixed gain (4.0 by
+  default, chosen by ear with BASS-NX; a chord measured with `REG 44`
+  stays far below full scale at 3.0) through a stereo-linked look-ahead limiter (64 frames, release
   200 ms, soft clip above 0.95), so the music is louder in the Next's mix
   without clipping. `SAVE` writes it. Host test: exact gain below the
   threshold, settles at -1 dB, catches sudden peaks, recovers, keeps the
@@ -62,6 +63,8 @@ Planned as golem-1.1.0.
 
 ### Changed
 
+- GeneralUser GS effects profile: shorter reverb (room size 0.4, damping
+  0.4, level 0.4 instead of 0.7, 0.19 and 0.5); the tail lasted over 4 s.
 - GPIO serial MIDI stays enabled when USB MIDI devices are attached (upstream
   turned it off), so the Next and a USB keyboard play the synth together.
 - USB serial and USB MIDI/Pisound input each have their own MIDI parser.
@@ -70,6 +73,15 @@ Planned as golem-1.1.0.
 
 ### Fixed
 
+- OPL3: a file in `opl3` with the `.wopl` name that is not a bank (a web
+  page saved by mistake) is left out at boot. Before, it took a bank number
+  and selecting it made the Golem client time out while the Pi read it.
+- OPL3: a faint whistle or hum after a song, at the pitch of its last notes.
+  A voice at rest still outputs -1 instead of 0 in the negative half of its
+  sine, at the last pitch (the real chip does the same, and Nuked OPL3
+  emulates it); with a voice panned hard to one side that 1 LSB reached the
+  DAC. A rendered buffer that never goes beyond 1 LSB is now silence. Found
+  by replaying a MIDI capture from the Pi on the host.
 - MT-32 MIDI channel assignment and master volume survive an MT-32 reset
   SysEx and a ROM set change. Before, `midi_channels = alternate` and the
   volume set with the buttons or encoder went back to the factory values as

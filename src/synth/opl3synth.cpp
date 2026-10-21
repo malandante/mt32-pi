@@ -96,6 +96,32 @@ bool COPL3Synth::Initialize()
 	return true;
 }
 
+// A WOPL file starts with this magic. Checked when scanning, so a file that
+// is not a bank (a web page saved with the .wopl name, say) is never listed:
+// selecting it failed only after reading the whole file, slowly enough on
+// the Pi for the Golem client to time out.
+static bool IsBankFile(const FILINFO& FileInfo)
+{
+	static const char Magic[] = "WOPL3-BANK";	// and its terminating zero
+	if (FileInfo.fsize < sizeof(Magic) || FileInfo.fsize > MaxBankFileSize)
+		return false;
+
+	CString Path;
+	Path.Format("%s/%s", BankFileDirectory, FileInfo.fname);
+	FIL File;
+	if (f_open(&File, Path, FA_READ) != FR_OK)
+		return false;
+	char Header[sizeof(Magic)];
+	UINT nRead = 0;
+	const bool bOk = f_read(&File, Header, sizeof(Header), &nRead) == FR_OK && nRead == sizeof(Header) &&
+	                 memcmp(Header, Magic, sizeof(Magic)) == 0;
+	f_close(&File);
+
+	if (!bOk)
+		LOGWARN("%s is not a WOPL bank, left out", static_cast<const char*>(Path));
+	return bOk;
+}
+
 void COPL3Synth::ScanBankFiles()
 {
 	DIR Dir;
@@ -108,7 +134,8 @@ void COPL3Synth::ScanBankFiles()
 	{
 		const size_t nLength = strlen(FileInfo.fname);
 		if (!(FileInfo.fattrib & (AM_DIR | AM_HID | AM_SYS)) && FileInfo.fname[0] != '.' &&
-		    nLength > 5 && strcasecmp(FileInfo.fname + nLength - 5, ".wopl") == 0)
+		    nLength > 5 && strcasecmp(FileInfo.fname + nLength - 5, ".wopl") == 0 &&
+		    IsBankFile(FileInfo))
 		{
 			TBankFile& Entry = m_BankFiles[m_nBankFiles++];
 			Entry.Path.Format("%s/%s", BankFileDirectory, FileInfo.fname);
@@ -164,7 +191,13 @@ void COPL3Synth::HandleMIDIShortMessage(u32 nMessage)
 {
 	m_Lock.Acquire();
 	OPL3MIDI::ShortMessage(m_pPlayer, nMessage);
+	const bool bStopped = m_SoundOffSweep.Message(nMessage);
 	m_Lock.Release();
+
+	// The stop sweep: a new player, so voices still releasing (some for many
+	// seconds) stop with the song, and the chip starts from rest.
+	if (bStopped)
+		Rebuild();
 
 	// Note On from silence: active straight away for the power-save logic
 	if ((nMessage & 0xF0) == 0x90 && ((nMessage >> 16) & 0x7F))
@@ -175,10 +208,32 @@ void COPL3Synth::HandleMIDIShortMessage(u32 nMessage)
 
 void COPL3Synth::HandleMIDISysExMessage(const u8* pData, size_t nSize)
 {
-	// GM/GS/XG resets, master volume and the like
+	// GM System On (.golem reset, and play before each song): a new player,
+	// so nothing from the previous song is left on the chip
+	const u8 GMSystemOn[] = {0xF0, 0x7E, 0x7F, 0x09, 0x01, 0xF7};
+	if (nSize == sizeof(GMSystemOn) && memcmp(pData, GMSystemOn, nSize) == 0)
+	{
+		Rebuild();
+		return;
+	}
+
+	// GS/XG resets, master volume and the like
 	m_Lock.Acquire();
 	adl_rt_systemExclusive(m_pPlayer, pData, nSize);
 	m_Lock.Release();
+}
+
+void COPL3Synth::Rebuild()
+{
+	ADL_MIDIPlayer* const pPlayer = CreatePlayer(m_nBank);
+	if (!pPlayer)
+		return;
+
+	m_Lock.Acquire();
+	ADL_MIDIPlayer* const pOldPlayer = m_pPlayer;
+	m_pPlayer = pPlayer;
+	m_Lock.Release();
+	adl_close(pOldPlayer);
 }
 
 void COPL3Synth::AllSoundOff()
@@ -262,10 +317,10 @@ bool COPL3Synth::SetBank(int nBank)
 	m_Lock.Acquire();
 	ADL_MIDIPlayer* const pOldPlayer = m_pPlayer;
 	m_pPlayer = pPlayer;
+	m_nBank = nBank;
 	m_Lock.Release();
 	adl_close(pOldPlayer);
 
-	m_nBank = nBank;
 	m_MIDIMonitor.AllNotesOff();
 	m_MIDIMonitor.ResetControllers(false);
 	LOGNOTE("Bank %d: %s", m_nBank, GetBankName(m_nBank));

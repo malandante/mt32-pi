@@ -115,6 +115,46 @@ namespace OPL3MIDI
 		}
 	}
 
+	// All Sound Off (CC 120) on all 16 channels, as a player sends when it
+	// stops (the Golem client sends CC 64, 123 and 120 on each). libADLMIDI
+	// then still lets voices already released ring out, and some instruments
+	// release for many seconds (bank 58, program 107: about 10 s). When the
+	// sweep completes, the caller makes a new player. It needs all 16
+	// channels: the Golem client's sweep stopped at channel 7 while SPACE was
+	// held (fixed in golem-next 1.2). Any Note On starts a new sweep.
+	struct TSoundOffSweep
+	{
+		uint16_t nChannels = 0;
+
+		// True when this message completes a sweep
+		bool Message(uint32_t nMessage)
+		{
+			const uint8_t nStatus = nMessage & 0xF0;
+			if (nStatus == 0x90 && ((nMessage >> 16) & 0x7F))
+				nChannels = 0;
+			else if (nStatus == 0xB0 && ((nMessage >> 8) & 0x7F) == 120)
+			{
+				nChannels |= 1u << (nMessage & 0x0F);
+				if (nChannels == 0xFFFF)
+				{
+					nChannels = 0;
+					return true;
+				}
+			}
+			return false;
+		}
+	};
+
+	// The chip's output at rest: a voice whose envelope has fully closed still
+	// gives -1 instead of 0 during the negative half of its sine (the real
+	// YMF262 does the same, and Nuked emulates it), and its oscillator keeps
+	// running at the last note's pitch. A voice panned hard to one side keeps
+	// that full -1 LSB, so after a song the chip can hum or whistle at
+	// -90 dBFS on its own (loud enough with gain 2.5 and an amplifier turned
+	// up, through a DAC that is otherwise silent). A buffer that never goes
+	// beyond this is silence.
+	constexpr float IdleLevel = 1.5f / 32768.0f;
+
 	// Interleaved stereo floats, scaled by nGain and kept within -1..1 (the
 	// audio task converts to integers without clipping). Returns the peak
 	// before clipping, so the caller can tell silence from sound.
@@ -128,6 +168,16 @@ namespace OPL3MIDI
 		adl_generateFormat(pPlayer, static_cast<int>(nFrames * 2),
 		                   reinterpret_cast<ADL_UInt8*>(pOut),
 		                   reinterpret_cast<ADL_UInt8*>(pOut + 1), &Format);
+
+		bool bIdle = true;
+		for (size_t i = 0; bIdle && i < nFrames * 2; ++i)
+			bIdle = pOut[i] <= IdleLevel && pOut[i] >= -IdleLevel;
+		if (bIdle)
+		{
+			for (size_t i = 0; i < nFrames * 2; ++i)
+				pOut[i] = 0.0f;
+			return 0.0f;
+		}
 
 		float nPeak = 0.0f;
 		for (size_t i = 0; i < nFrames * 2; ++i)

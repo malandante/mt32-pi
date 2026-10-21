@@ -155,6 +155,39 @@ int main()
 		Check(bInRange && (Out[0] == 1.0f || Out[2] == 1.0f), "synth plus Next is clipped to -1..1");
 	}
 
+	// 4. A floating GPIO 20 (the Next's I2S off): random bits come out silent
+	{
+		NextAudio::CRing<1024> Ring;
+		std::vector<uint32_t> Noise(2 * 128);
+		uint32_t x = 12345;
+		for (auto& w : Noise)
+		{
+			x = x * 1103515245u + 12345u;
+			w = x;
+		}
+		for (int i = 0; i < 8; ++i)
+			Ring.Put(Noise.data(), 128);
+		std::vector<float> Out(2 * 512, 0.0f);
+		Ring.MixInto(Out.data(), 512, 1.0f);
+		bool bSilent = true;
+		for (float v : Out)
+			bSilent = bSilent && v == 0.0f;
+		Check(bSilent && Ring.InvalidChunks() == 8, "floating input gives silence");
+
+		// The Next's real samples (low 11 bits zero) still pass afterwards
+		Ring.MixInto(Out.data(), 512, 1.0f);	// the rest of the silence
+		std::vector<uint32_t> Good(2 * 128);
+		for (size_t i = 0; i < Good.size(); ++i)
+			Good[i] = static_cast<uint32_t>((i / 2) % 2 ? 2048 * 2048 : -2048 * 2048);
+		for (int i = 0; i < 8; ++i)
+			Ring.Put(Good.data(), 128);
+		Ring.MixInto(Out.data(), 512, 1.0f);
+		float nPeak = 0;
+		for (float v : Out)
+			nPeak = std::fmax(nPeak, std::fabs(v));
+		Check(nPeak > 0.9f && Ring.InvalidChunks() == 8, "the Next's samples pass again");
+	}
+
 	std::printf("%s\n", g_nFailures ? "FAILED" : "all passed");
 	return g_nFailures ? 1 : 0;
 }
