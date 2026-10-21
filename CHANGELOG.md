@@ -63,6 +63,8 @@ Planned as golem-1.1.0.
 
 ### Changed
 
+- GeneralUser GS effects profile: shorter reverb (room size 0.4, damping
+  0.4, level 0.4 instead of 0.7, 0.19 and 0.5); the tail lasted over 4 s.
 - GPIO serial MIDI stays enabled when USB MIDI devices are attached (upstream
   turned it off), so the Next and a USB keyboard play the synth together.
 - USB serial and USB MIDI/Pisound input each have their own MIDI parser.
