@@ -89,6 +89,8 @@ private:
 	void QueueKeptSettings();
 	void QueueRolandWrite(const u8* pAddressAndData, size_t nSize);
 	static bool IsResetSysEx(const u8* pData, size_t nSize);
+	static bool WritesMIDIChannels(const u8* pData, size_t nSize);
+	void ApplyOutputGain();
 
 	// MT32Emu::ReportHandler
 	virtual bool onMIDIQueueOverflow() override;
