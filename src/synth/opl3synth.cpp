@@ -167,9 +167,8 @@ void COPL3Synth::HandleMIDIShortMessage(u32 nMessage)
 	const bool bStopped = m_SoundOffSweep.Message(nMessage);
 	m_Lock.Release();
 
-	// The stop sweep: a new player, as a bank change makes. adl_reset was not
-	// enough on hardware (a note kept sounding after a stop); a bank change
-	// always silenced it.
+	// The stop sweep: a new player, so voices still releasing (some for many
+	// seconds) stop with the song, and the chip starts from rest.
 	if (bStopped)
 		Rebuild();
 

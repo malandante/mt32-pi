@@ -210,6 +210,40 @@ static int Checks()
 		adl_close(p);
 	}
 
+	// After a note, the chip at rest is silence: a voice panned hard left
+	// whistled at its pitch at -1 LSB (heard after stopping a song, capture of
+	// 2026-10-21), and the tail before it is still there
+	{
+		ADL_MIDIPlayer* p = NewPlayer(58);
+		OPL3MIDI::ShortMessage(p, Msg(0xB0, 10, 0));
+		OPL3MIDI::ShortMessage(p, Msg(0x90, 84, 100));
+		Run(p, 1000);
+		OPL3MIDI::ShortMessage(p, Msg(0x80, 84));
+		const float nTail = Run(p, 100);
+		Run(p, 20000);
+		float Buffer[256 * 2];
+		bool bZero = true;
+		for (int b = 0; b < 400; ++b)
+		{
+			OPL3MIDI::Render(p, Buffer, 256, Gain);
+			for (float x : Buffer)
+				bZero = bZero && x == 0.0f;
+		}
+		Check(nTail > 1e-3f && bZero, "no idle whistle from a voice at rest");
+
+		// Without the gate, the same state gives -1 LSB at the note's pitch
+		ADLMIDI_AudioFormat Format{ADLMIDI_SampleType_F32, sizeof(float), 2 * sizeof(float)};
+		bool bWhistle = false;
+		for (int b = 0; b < 100; ++b)
+		{
+			adl_generateFormat(p, 512, reinterpret_cast<ADL_UInt8*>(Buffer), reinterpret_cast<ADL_UInt8*>(Buffer + 1), &Format);
+			for (float x : Buffer)
+				bWhistle = bWhistle || x != 0.0f;
+		}
+		Check(bWhistle, "(the chip itself still gives the 1 LSB whistle)");
+		adl_close(p);
+	}
+
 	// A bank change builds a new player, so the sound does not depend on the
 	// banks used before: two new players for bank 72 play the same samples
 	{
