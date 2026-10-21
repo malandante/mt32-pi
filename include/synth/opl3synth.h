@@ -83,13 +83,6 @@ private:
 	static constexpr unsigned CaptureSize = 16384;
 	void Capture(u32 nMessage);
 	void WriteCapture(const char* pReason);
-	TCapture m_Capture[CaptureSize];
-	unsigned m_nCaptureCount;
-	volatile u32 m_nSweepTime;
-	volatile unsigned m_nPostSweepFrames;
-	volatile float m_nPostSweepPeak;
-	volatile unsigned m_nPostSweepCrossings;
-	float m_nLastSample;
 
 	ADL_MIDIPlayer* m_pPlayer;
 	int m_nEmulator;
@@ -103,6 +96,14 @@ private:
 	volatile bool m_bActive;
 	unsigned int m_nSilentFrames;
 	OPL3MIDI::TSoundOffSweep m_SoundOffSweep;
+
+	TCapture m_Capture[CaptureSize];
+	unsigned m_nCaptureCount;
+	volatile u32 m_nSweepTime;
+	volatile unsigned m_nPostSweepFrames;
+	volatile float m_nPostSweepPeak;
+	volatile unsigned m_nPostSweepCrossings;
+	float m_nLastSample;
 };
 
 #endif
