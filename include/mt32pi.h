@@ -54,6 +54,7 @@
 #include "event.h"
 #include "lcd/ui.h"
 #include "midiparser.h"
+#include "nextaudioinput.h"
 #include "net/applemidi.h"
 #include "net/ftpdaemon.h"
 #include "net/udpmidi.h"
@@ -245,6 +246,7 @@ private:
 
 	// Audio output
 	CSoundBaseDevice* m_pSound;
+	CNextAudioInput* m_pNextAudio;
 
 	// Extra devices
 	CPisound* m_pPisound;
