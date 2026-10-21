@@ -110,6 +110,9 @@ For golem-next 1.2.0. golem-1.1.0 was never published: its changes are here.
 
 - Through the Next's minijack, quiet sounds crackle; through HDMI they are
   clean. It is the Next's analogue converter, the same with official mt32-pi.
+- A faint click can be heard when an MT-32 reset arrives while a reverb tail
+  is still sounding: Munt cuts it at once. A short fade is planned for the
+  next version.
 
 ## [golem-1.0.1] - 2026-10-08
 
