@@ -32,6 +32,7 @@
 #include <circle/spimaster.h>
 #include <circle/timer.h>
 
+#include "midiserialdevice.h"
 #include "config.h"
 #include "mt32pi.h"
 #include "zoneallocator.h"
@@ -46,7 +47,7 @@ public:
 
 protected:
 	CCPUThrottle m_CPUThrottle;
-	CSerialDevice m_Serial;
+	CMIDISerialDevice m_Serial;
 #ifdef HDMI_CONSOLE
 	CScreenDevice m_Screen;
 #endif
