@@ -33,6 +33,7 @@
 #include "lcd/drivers/ssd1306.h"
 #include "lcd/ui.h"
 #include "mt32pi.h"
+#include "diagcapture.h"
 
 #define MT32_PI_NAME "mt32-pi"
 LOGMODULE(MT32_PI_NAME);
@@ -724,12 +725,15 @@ void CMT32Pi::AudioTask()
 	// array, so the conversion wrote over FloatBuffer on the stack)
 	s8 IntBuffer[nQueueSizeFrames * nBytesPerFrame + (bI2S ? 0 : 1)];
 
+	DiagCapture::Init(m_pConfig->AudioSampleRate);
+
 	while (m_bRunning)
 	{
 		const size_t nFrames = nQueueSizeFrames - m_pSound->GetQueueFramesAvail();
 		const size_t nWriteBytes = nFrames * nBytesPerFrame;
 
 		m_pCurrentSynth->Render(FloatBuffer, nFrames);
+		DiagCapture::Audio(FloatBuffer, nFrames, false);
 
 		// Loudness: a fresh limiter each time it is switched on, so no old
 		// audio is left in its look-ahead
@@ -748,6 +752,7 @@ void CMT32Pi::AudioTask()
 
 		if (m_pNextAudio)
 			m_pNextAudio->MixInto(FloatBuffer, nFrames, nNextInputGain);
+		DiagCapture::Audio(FloatBuffer, nFrames, true);
 
 		if (bReversedStereo)
 		{
@@ -843,6 +848,8 @@ void CMT32Pi::OnSysExMessage(const u8* pData, size_t nSize)
 	// Flash LED
 	LEDOn();
 
+	DiagCapture::SysEx(pData, nSize);
+
 	// mt32-pi and Golem control messages are consumed here and never forwarded
 	if (!ParseCustomSysEx(pData, nSize))
 	{
@@ -891,6 +898,7 @@ void CMT32Pi::OnExternalSysExMessage(const u8* pData, size_t nSize)
 		return;
 
 	LEDOn();
+	DiagCapture::SysEx(pData, nSize);
 
 	if (!ParseCustomSysEx(pData, nSize))
 	{
@@ -908,6 +916,8 @@ void CMT32Pi::OnExternalSysExMessage(const u8* pData, size_t nSize)
 
 void CMT32Pi::HandleShortMessage(u32 nMessage)
 {
+	DiagCapture::ShortMessage(nMessage);
+
 	// Active sensing
 	if (nMessage == 0xFE)
 	{
