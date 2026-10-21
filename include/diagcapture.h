@@ -3,9 +3,9 @@
 //
 // Diagnostic build only (diag/audio-capture): the last 60 s of audio, the
 // synth's own render and the final output, and every MIDI message with the
-// audio frame it arrived at. GM System On (.golem reset) writes them to the
+// audio frame it arrived at. Golem SAVE (.golem save) writes them to the
 // SD card as capture.wav (4 channels: synth L, R, output L, R) and
-// capture.txt, before the reset is applied.
+// capture.txt.
 //
 
 #ifndef _diagcapture_h
@@ -23,7 +23,7 @@ namespace DiagCapture
 	void ShortMessage(u32 nMessage);
 	// The output queue ran dry (an audible gap); nFree = frames it could take
 	void Underrun(unsigned nFree);
-	// True when the message is GM System On: the capture has been written
+	// True when the message is Golem SAVE: the capture has been written
 	bool SysEx(const u8* pData, size_t nSize);
 }
 

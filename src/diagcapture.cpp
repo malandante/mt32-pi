@@ -163,8 +163,10 @@ namespace DiagCapture
 
 	bool SysEx(const u8* pData, size_t nSize)
 	{
-		static const u8 GMSystemOn[] = {0xF0, 0x7E, 0x7F, 0x09, 0x01, 0xF7};
-		if (nSize == sizeof(GMSystemOn) && memcmp(pData, GMSystemOn, nSize) == 0)
+		// .golem save (Golem SAVE, command 6): not GM System On, which every
+		// play sends, so the write (seconds) never stalls a song starting
+		static const u8 GolemHeader[] = {0xF0, 0x7D, 0x47, 0x4C, 0x4D, 0x01};
+		if (nSize >= 8 && memcmp(pData, GolemHeader, sizeof(GolemHeader)) == 0 && pData[7] == 0x06)
 		{
 			Write();
 			return true;
