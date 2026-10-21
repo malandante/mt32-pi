@@ -5,9 +5,9 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [golem-1.2.0] - 2026-10-21
 
-Planned as golem-1.1.0.
+For golem-next 1.2.0. golem-1.1.0 was never published: its changes are here.
 
 ### Added
 
@@ -96,6 +96,15 @@ Planned as golem-1.1.0.
   General MIDI songs, `.golem usb` with no device; Roland UM-ONE with a
   JV-1010 (`off`, `on`, `bridge`); a DIN keyboard through the UM-ONE playing
   FluidSynth.
+- Raspberry Pi 4, 18 and 21 October 2026, golem-next 1.2.0 through HDMI to a
+  TV: `SET_PARAMETER` (volume with MT-32, FluidSynth and OPL3, effects, MT-32
+  alternate channels surviving Monkey Island's SysEx, keys, bank, loudness),
+  `SAVE`, keys to the Next with `.midimon`; OPL3 with Nuked on banks 72, 58
+  and a WOPL file, stopped at many moments with nothing left sounding (checked
+  with a capture of the MIDI received, replayed on the host); the Next's
+  audio input silent while its I2S is off; loudness level measured on the
+  Next and gain 4.0 chosen by ear; the GeneralUser GS reverb. Not on the Pi 3,
+  and the PWM output not checked.
 
 ### Note
 
