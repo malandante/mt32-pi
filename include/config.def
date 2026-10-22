@@ -62,12 +62,14 @@ CFG(loudness_gain,		float,				GolemLoudnessGain,			4.0f						)
 END_SECTION
 
 BEGIN_SECTION(audio)
-CFG(output_device,		TAudioOutputDevice,		AudioOutputDevice,			TAudioOutputDevice::PWM				)
+CFG(output_device,		TAudioOutputDevice,		AudioOutputDevice,			TAudioOutputDevice::I2S				)
 CFG(sample_rate,		int,				AudioSampleRate,			48000						)
 CFG(chunk_size,			int,				AudioChunkSize,				256						)
 CFG(reversed_stereo,		bool,				AudioReversedStereo,			false						)
 CFG(next_input,			bool,				AudioNextInput,				false						)
 CFG(next_input_gain,		float,				AudioNextInputGain,			1.0f						)
+CFG(pwm_oversampling,		bool,				AudioPWMOversampling,			true						)
+CFG(pwm_dither,			TPWMDither,			AudioPWMDither,				TPWMDither::Shaped				)
 END_SECTION
 
 BEGIN_SECTION(control)

@@ -61,6 +61,16 @@ jobs:
           g++ -std=c++17 -Wall -Wextra -Werror -Iinclude tests/test_loudness.cpp -o test_loudness
           ./test_loudness
 
+      - name: Fade around a synth's own cut (MT-32 reset, new OPL3 player)
+        run: |
+          g++ -std=c++17 -Wall -Wextra -Werror -Iinclude tests/test_declick.cpp -o test_declick
+          ./test_declick
+
+      - name: PWM output (oversampling, dither, exact levels)
+        run: |
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror -Iinclude tests/test_pwmoutput.cpp -o test_pwmoutput
+          ./test_pwmoutput
+
       - name: Next audio input (I2S from the Next, ring buffer)
         run: |
           g++ -std=c++17 -Wall -Wextra -Werror -Iinclude tests/test_nextaudiomix.cpp -o test_nextaudiomix
@@ -154,7 +164,7 @@ jobs:
         path: kernel*.img
 
   package:
-    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/feat/golem-') || startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
     needs: build
     runs-on: ubuntu-latest
     env:
@@ -244,21 +254,6 @@ jobs:
             ${{ env.wlan-home }}/firmware/brcmfmac43456-sdio.clm_blob \
             sdcard/firmware
 
-    - name: Cache GeneralUser GS SoundFont
-      id: cache-generaluser-gs
-      uses: actions/cache@v3
-      with:
-        path: GeneralUser GS v1.511
-        key: cache-generaluser-gs-1.511
-
-    - name: Download GeneralUser GS SoundFont if not retrieved from cache
-      if: steps.cache-generaluser-gs.outputs.cache-hit != 'true'
-      continue-on-error: true   # Google Drive may refuse; the SD card then ships without it
-      run: |
-        sudo pip install gdown
-        gdown -q https://drive.google.com/uc?id=1ypgJwuHqqXx-jeCXLRFqgBAEemJZnDrj
-        unzip "GeneralUser GS v1.511.zip"
-
     - name: Retrieve built kernels (one artifact per board)
       uses: actions/download-artifact@v4
       with:
@@ -271,15 +266,32 @@ jobs:
         ls -l sdcard/kernel*.img
         for k in kernel7.img kernel8.img kernel8-rpi4.img; do test -f "sdcard/$k" || { echo "missing $k"; exit 1; }; done
 
+    # GeneralUser GS, the SoundFont the card ships with (free to
+    # redistribute; its licence goes in docs/). From its author's GitHub
+    # repository: the Google Drive download it used before failed silently
+    # and golem-1.2.0 shipped without it. A missing SoundFont now stops the
+    # package.
+    - name: Get GeneralUser GS SoundFont
+      run: |
+        git clone --depth 1 https://github.com/mrbumpy409/GeneralUser-GS.git gugs
+        sf=$(find gugs -iname '*.sf2' | sort | head -1)
+        test -n "$sf" || { echo "no .sf2 in GeneralUser-GS"; exit 1; }
+        echo "SoundFont: $sf"
+        echo "GUGS_SF=$sf" >> "$GITHUB_ENV"
+
     - name: Add extra files to SD card directory
       run: |
         mkdir sdcard/docs
-        if [ -f "GeneralUser GS v1.511/GeneralUser GS v1.511.sf2" ]; then
-          cp "GeneralUser GS v1.511/GeneralUser GS v1.511.sf2" sdcard/soundfonts
-          cp "GeneralUser GS v1.511/CHANGELOG.md" sdcard/docs/CHANGELOG.GeneralUserGS
-          cp "GeneralUser GS v1.511/LICENSE.txt" sdcard/docs/LICENSE.GeneralUserGS
-        fi
         cp LICENSE sdcard/docs
+        name=$(basename "$GUGS_SF" .sf2)
+        cp "$GUGS_SF" sdcard/soundfonts/
+        # The effects profile goes with the SoundFont's file name
+        if [ "sdcard/soundfonts/$name.cfg" != "sdcard/soundfonts/GeneralUser GS v1.511.cfg" ]; then
+          mv "sdcard/soundfonts/GeneralUser GS v1.511.cfg" "sdcard/soundfonts/$name.cfg"
+        fi
+        lic=$(find gugs -maxdepth 2 -iname 'licen[cs]e*' | head -1)
+        test -n "$lic" && cp "$lic" sdcard/docs/LICENSE.GeneralUserGS
+        ls -l sdcard/soundfonts
         cp README.md sdcard/docs
 
     - name: Upload SD card archive

@@ -24,8 +24,10 @@
 #define _synthbase_h
 
 #include <circle/spinlock.h>
+#include <circle/timer.h>
 #include <circle/types.h>
 
+#include "declick.h"
 #include "lcd/lcd.h"
 #include "lcd/ui.h"
 #include "midimonitor.h"
@@ -53,6 +55,20 @@ public:
 	virtual void ReportStatus() const = 0;
 	virtual void UpdateLCD(CLCD& LCD, unsigned int nTicks) = 0;
 	void SetUserInterface(CUserInterface* pUI) { m_pUI = pUI; }
+
+	// Around a cut the synth makes (a reset, a new player): fade out and wait
+	// for silence, up to 50 ms (the audio task may not be rendering this
+	// synth), then cut and fade in. The audio task runs m_Declick.
+	void FadeOutAndWait()
+	{
+		m_Declick.RequestFadeOut();
+		const unsigned nStart = CTimer::GetClockTicks();
+		while (!m_Declick.IsSilent() && CTimer::GetClockTicks() - nStart < 50000)
+			;
+	}
+	void FadeIn() { m_Declick.RequestFadeIn(); }
+
+	CDeclick m_Declick;
 
 	CSpinLock m_Lock;
 	unsigned int m_nSampleRate;

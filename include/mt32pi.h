@@ -252,6 +252,7 @@ private:
 	// [golem] loudness: set by the main task, applied by the audio task
 	volatile bool m_bLoudness;
 	Loudness::CLimiter m_Limiter;
+	Loudness::CLimiter m_MixLimiter;	// keeps the synth plus the Next's sound from clipping
 
 	// Extra devices
 	CPisound* m_pPisound;
