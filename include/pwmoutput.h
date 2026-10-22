@@ -50,6 +50,9 @@
 
 namespace PWMOutput
 {
+	// M_PI is not in every C library (newlib in strict mode)
+	constexpr float Pi = 3.14159265358979f;
+
 	enum class TDither
 	{
 		Off,
@@ -86,7 +89,7 @@ namespace PWMOutput
 			for (int j = 0; j < 2 * Half; ++j)
 			{
 				const float t = j - Half + 0.5f;
-				const float x = static_cast<float>(M_PI) * t;
+				const float x = Pi * t;
 				const float r = t / (Half + 0.5f);
 				m_Taps[j] = sinf(x) / x * Kaiser(8.0f, r);
 				nSum += m_Taps[j];
@@ -149,7 +152,7 @@ namespace PWMOutput
 			m_nRangeMax = nRangeMax;
 			m_Dither = Dither == TDither::Shaped && nSampleRate < 88200 ? TDither::On : Dither;
 			// Noise transfer (1 - z^-1)(1 - c z^-1 + z^-2), zeros at 0 Hz and 12 kHz
-			m_nC = 2.0f * cosf(2.0f * static_cast<float>(M_PI) * 12000.0f / nSampleRate);
+			m_nC = 2.0f * cosf(2.0f * Pi * 12000.0f / nSampleRate);
 		}
 
 		void Process(const float* pIn, size_t nFrames, int32_t* pOut)
