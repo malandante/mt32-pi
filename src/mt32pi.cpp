@@ -748,7 +748,7 @@ void CMT32Pi::AudioTask()
 		m_MixLimiter.Configure(m_pConfig->AudioSampleRate, 1.0f);
 
 	float* const pUpBuffer = pUpsampler ? new float[nQueueSizeFrames * nChannels] : nullptr;
-	s32* const pLevelBuffer = pQuantizer ? new s32[nQueueSizeFrames * nChannels] : nullptr;
+	int32_t* const pLevelBuffer = pQuantizer ? new int32_t[nQueueSizeFrames * nChannels] : nullptr;
 
 	// Extra byte so that we can write to the 24-bit buffer with overlapping 32-bit writes (efficiency)
 	float FloatBuffer[nQueueSizeFrames * nChannels];
