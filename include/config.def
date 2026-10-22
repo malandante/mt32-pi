@@ -68,6 +68,8 @@ CFG(chunk_size,			int,				AudioChunkSize,				256						)
 CFG(reversed_stereo,		bool,				AudioReversedStereo,			false						)
 CFG(next_input,			bool,				AudioNextInput,				false						)
 CFG(next_input_gain,		float,				AudioNextInputGain,			1.0f						)
+CFG(pwm_oversampling,		bool,				AudioPWMOversampling,			true						)
+CFG(pwm_dither,			TPWMDither,			AudioPWMDither,				TPWMDither::Shaped				)
 END_SECTION
 
 BEGIN_SECTION(control)

@@ -61,6 +61,16 @@ jobs:
           g++ -std=c++17 -Wall -Wextra -Werror -Iinclude tests/test_loudness.cpp -o test_loudness
           ./test_loudness
 
+      - name: Fade around a synth's own cut (MT-32 reset, new OPL3 player)
+        run: |
+          g++ -std=c++17 -Wall -Wextra -Werror -Iinclude tests/test_declick.cpp -o test_declick
+          ./test_declick
+
+      - name: PWM output (oversampling, dither, exact levels)
+        run: |
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror -Iinclude tests/test_pwmoutput.cpp -o test_pwmoutput
+          ./test_pwmoutput
+
       - name: Next audio input (I2S from the Next, ring buffer)
         run: |
           g++ -std=c++17 -Wall -Wextra -Werror -Iinclude tests/test_nextaudiomix.cpp -o test_nextaudiomix

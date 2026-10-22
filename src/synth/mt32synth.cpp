@@ -131,15 +131,24 @@ void CMT32Synth::HandleMIDIShortMessage(u32 nMessage)
 
 void CMT32Synth::HandleMIDISysExMessage(const u8* pData, size_t nSize)
 {
+	// Munt cuts its reverb tail at the reset: fade it out first (a click
+	// otherwise, louder with the loudness gain)
+	const bool bReset = IsResetSysEx(pData, nSize);
+	if (bReset)
+		FadeOutAndWait();
+
 	m_pSynth->playSysex(pData, nSize);
 
 	// The reset restores the factory channels; queue the kept ones right
 	// behind it so the notes that follow already use them. A song (or game)
 	// that writes the channel assignment itself, as Sierra and LucasArts
 	// drivers do, gets the alternate map back right after it too.
-	if (IsResetSysEx(pData, nSize) ||
+	if (bReset ||
 	    (m_MIDIChannels == TMIDIChannels::Alternate && WritesMIDIChannels(pData, nSize)))
 		QueueKeptSettings();
+
+	if (bReset)
+		FadeIn();
 }
 
 // Roland DT1 to the MT-32 whose data covers part of the MIDI channel

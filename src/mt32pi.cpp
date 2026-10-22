@@ -33,6 +33,7 @@
 #include "lcd/drivers/ssd1306.h"
 #include "lcd/ui.h"
 #include "mt32pi.h"
+#include "pwmoutput.h"
 
 #define MT32_PI_NAME "mt32-pi"
 LOGMODULE(MT32_PI_NAME);
@@ -302,9 +303,18 @@ bool CMT32Pi::Initialize(bool bSerialMIDIAvailable)
 	switch (m_pConfig->AudioOutputDevice)
 	{
 		case CConfig::TAudioOutputDevice::PWM:
+		{
+			// Oversampling: the PWM runs at twice the rate (see pwmoutput.h)
+			const unsigned nOversample = m_pConfig->AudioPWMOversampling ? 2 : 1;
 			LCDLog(TLCDLogType::Startup, "Init audio (PWM)");
-			m_pSound = new CPWMSoundBaseDevice(m_pInterrupt, m_pConfig->AudioSampleRate, m_pConfig->AudioChunkSize);
+			m_pSound = new CPWMSoundBaseDevice(m_pInterrupt, m_pConfig->AudioSampleRate * nOversample, m_pConfig->AudioChunkSize * nOversample);
+			nQueueSize = m_pConfig->AudioChunkSize * nOversample;
+			LOGNOTE("PWM: %u Hz, %d levels, dither %s", m_pConfig->AudioSampleRate * nOversample,
+			        static_cast<CPWMSoundBaseDevice*>(m_pSound)->GetRangeMax(),
+			        m_pConfig->AudioPWMDither == CConfig::TPWMDither::Shaped ? "shaped" :
+			        m_pConfig->AudioPWMDither == CConfig::TPWMDither::On ? "on" : "off");
 			break;
+		}
 
 		case CConfig::TAudioOutputDevice::HDMI:
 		{
@@ -339,8 +349,8 @@ bool CMT32Pi::Initialize(bool bSerialMIDIAvailable)
 	if (!m_pSound->AllocateQueueFrames(nQueueSize))
 		LOGPANIC("Failed to allocate sound queue");
 
-	// Experimental: the Next's own audio over I2S, mixed into a PWM or HDMI
-	// output (with I2S output it would go back into the Next)
+	// All the Next's sound through the Golem: its own audio over I2S, mixed
+	// into a PWM or HDMI output (with I2S output it would go back into the Next)
 	if (m_pConfig->AudioNextInput)
 	{
 		if (m_pConfig->AudioOutputDevice == CConfig::TAudioOutputDevice::I2S || m_pPisound)
@@ -718,6 +728,28 @@ void CMT32Pi::AudioTask()
 	const float nNextInputGain = m_pConfig->AudioNextInputGain;
 	bool bLimiting = false;
 
+	// The PWM output: oversampling, dither and levels computed here (see
+	// pwmoutput.h); with both off, Circle's own conversion as before
+	const bool bPWM = m_pConfig->AudioOutputDevice == CConfig::TAudioOutputDevice::PWM;
+	const unsigned nOversample = bPWM && m_pConfig->AudioPWMOversampling ? 2 : 1;
+	const bool bPWMConditioned = bPWM && (nOversample > 1 || m_pConfig->AudioPWMDither != CConfig::TPWMDither::Off);
+	PWMOutput::CUpsampler2x* const pUpsampler = nOversample > 1 ? new PWMOutput::CUpsampler2x : nullptr;
+	PWMOutput::CQuantizer* const pQuantizer = bPWMConditioned ? new PWMOutput::CQuantizer : nullptr;
+	if (pQuantizer)
+	{
+		const PWMOutput::TDither Dither = m_pConfig->AudioPWMDither == CConfig::TPWMDither::Shaped ? PWMOutput::TDither::Shaped :
+		                                  m_pConfig->AudioPWMDither == CConfig::TPWMDither::On ? PWMOutput::TDither::On :
+		                                                                                         PWMOutput::TDither::Off;
+		pQuantizer->Configure(static_cast<CPWMSoundBaseDevice*>(m_pSound)->GetRangeMax(), Dither, m_pConfig->AudioSampleRate * nOversample);
+	}
+	// With the Next's sound mixed in, the sum can go past full scale: a
+	// limiter at unity gain holds it (it only acts on peaks)
+	if (m_pNextAudio)
+		m_MixLimiter.Configure(m_pConfig->AudioSampleRate, 1.0f);
+
+	float* const pUpBuffer = pUpsampler ? new float[nQueueSizeFrames * nChannels] : nullptr;
+	s32* const pLevelBuffer = pQuantizer ? new s32[nQueueSizeFrames * nChannels] : nullptr;
+
 	// Extra byte so that we can write to the 24-bit buffer with overlapping 32-bit writes (efficiency)
 	float FloatBuffer[nQueueSizeFrames * nChannels];
 	// (was 'n + bI2S ? 0 : 1', which parses as '(n + bI2S) ? 0 : 1': a zero-length
@@ -726,10 +758,14 @@ void CMT32Pi::AudioTask()
 
 	while (m_bRunning)
 	{
-		const size_t nFrames = nQueueSizeFrames - m_pSound->GetQueueFramesAvail();
-		const size_t nWriteBytes = nFrames * nBytesPerFrame;
+		// Frames the output can take, and the synth's share of them
+		const size_t nOutFrames = (nQueueSizeFrames - m_pSound->GetQueueFramesAvail()) / nOversample * nOversample;
+		const size_t nFrames = nOutFrames / nOversample;
+		const size_t nWriteBytes = nOutFrames * nBytesPerFrame;
 
-		m_pCurrentSynth->Render(FloatBuffer, nFrames);
+		CSynthBase* const pSynth = m_pCurrentSynth;
+		pSynth->Render(FloatBuffer, nFrames);
+		pSynth->m_Declick.Process(FloatBuffer, nFrames);
 
 		// Loudness: a fresh limiter each time it is switched on, so no old
 		// audio is left in its look-ahead
@@ -747,9 +783,27 @@ void CMT32Pi::AudioTask()
 			bLimiting = false;
 
 		if (m_pNextAudio)
+		{
 			m_pNextAudio->MixInto(FloatBuffer, nFrames, nNextInputGain);
+			m_MixLimiter.Process(FloatBuffer, nFrames);
+		}
 
-		if (bReversedStereo)
+		if (pQuantizer)
+		{
+			const float* pIn = FloatBuffer;
+			if (pUpsampler)
+			{
+				pUpsampler->Process(FloatBuffer, nFrames, pUpBuffer);
+				pIn = pUpBuffer;
+			}
+			pQuantizer->Process(pIn, nOutFrames, pLevelBuffer);
+			for (size_t i = 0; i < nOutFrames * nChannels; ++i)
+			{
+				s32* const pSample = reinterpret_cast<s32*>(IntBuffer + i * nBytesPerSample);
+				*pSample = pLevelBuffer[bReversedStereo ? i ^ 1 : i];
+			}
+		}
+		else if (bReversedStereo)
 		{
 			// Convert to signed 24-bit integers with channel swap
 			for (size_t i = 0; i < nFrames * nChannels; i += nChannels)

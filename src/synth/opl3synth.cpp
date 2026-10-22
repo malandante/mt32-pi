@@ -229,10 +229,13 @@ void COPL3Synth::Rebuild()
 	if (!pPlayer)
 		return;
 
+	// The old player may still be releasing notes: fade, no click
+	FadeOutAndWait();
 	m_Lock.Acquire();
 	ADL_MIDIPlayer* const pOldPlayer = m_pPlayer;
 	m_pPlayer = pPlayer;
 	m_Lock.Release();
+	FadeIn();
 	adl_close(pOldPlayer);
 }
 
@@ -314,11 +317,13 @@ bool COPL3Synth::SetBank(int nBank)
 	if (!pPlayer)
 		return false;
 
+	FadeOutAndWait();
 	m_Lock.Acquire();
 	ADL_MIDIPlayer* const pOldPlayer = m_pPlayer;
 	m_pPlayer = pPlayer;
 	m_nBank = nBank;
 	m_Lock.Release();
+	FadeIn();
 	adl_close(pOldPlayer);
 
 	m_MIDIMonitor.AllNotesOff();
