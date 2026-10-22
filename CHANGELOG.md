@@ -31,6 +31,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with the Golem Link's resistors and cable). The link now runs at its own
   rate, `next_input_rate` (32000 by default), and the Next's sound is
   converted to `sample_rate`.
+- The SD card ships with GeneralUser GS again: golem-1.2.0 went out without
+  it (its Google Drive download failed silently). It now comes from its
+  author's GitHub repository, and a package without it is not built.
 - A click when an MT-32 reset arrived while a reverb tail was still sounding
   (Munt cuts it at once), and when a new OPL3 player replaced one still
   releasing notes (stop, GM System On, bank change): the sound now fades out
