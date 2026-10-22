@@ -11,6 +11,9 @@ Planned as golem-1.3.0.
 
 ### Added
 
+- Ready for the Golem out of the box: `output_device = i2s` is now the
+  default and the packaged `mt32-pi.cfg` needs no editing (31250 baud and
+  `gpio_thru = off` already were).
 - All the Next's sound through the Golem is no longer experimental:
   `[audio] next_input` with `output_device = pwm` (or `hdmi`) is the setup
   for a VGA monitor or a monitor without speakers. A limiter at unity gain
