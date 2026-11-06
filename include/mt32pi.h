@@ -180,8 +180,8 @@ private:
 	// onwards; mt32pi_params.cpp
 	bool SendGolemFrame(const u8* pData, size_t nSize);
 	virtual golem::ParamInfo Info() override;
-	virtual u8 AreaRead(u8 nArea, u32 nAddress, size_t nSize, std::vector<u8>& Out) override;
-	virtual u8 AreaWrite(u8 nArea, u32 nAddress, const u8* pData, size_t nSize, size_t& nBad) override;
+	virtual u8 AreaRead(u8 nArea, uint32_t nAddress, size_t nSize, std::vector<u8>& Out) override;
+	virtual u8 AreaWrite(u8 nArea, uint32_t nAddress, const u8* pData, size_t nSize, size_t& nBad) override;
 	virtual u8 BlobCommit(u8 nType, u8 nTarget, std::vector<u8>&& File) override;
 	virtual u8 BlobGet(u8 nType, u8 nOrigin, std::vector<u8>& File) override;
 	u8 ReadSetting(u32 nSection, u32 nParameter, u8& nValue);

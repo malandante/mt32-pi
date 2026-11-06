@@ -107,7 +107,7 @@ golem::ParamInfo CMT32Pi::Info()
 	return Info;
 }
 
-u8 CMT32Pi::AreaRead(u8 nArea, u32 nAddress, size_t nSize, std::vector<u8>& Out)
+u8 CMT32Pi::AreaRead(u8 nArea, uint32_t nAddress, size_t nSize, std::vector<u8>& Out)
 {
 	Out.clear();
 	if (nArea == golem::param::OPL3Instr || nArea == golem::param::OPL3Banks)
@@ -200,7 +200,7 @@ u8 CMT32Pi::ReadSetting(u32 nSection, u32 p, u8& v)
 	return golem::param::BadAddress;
 }
 
-u8 CMT32Pi::AreaWrite(u8 nArea, u32 nAddress, const u8* pData, size_t nSize, size_t& nBad)
+u8 CMT32Pi::AreaWrite(u8 nArea, uint32_t nAddress, const u8* pData, size_t nSize, size_t& nBad)
 {
 	if (nArea == golem::param::OPL3Instr || nArea == golem::param::OPL3Banks)
 		return WriteOPL3(nArea, nAddress, pData, nSize, nBad);
