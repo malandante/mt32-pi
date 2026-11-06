@@ -155,6 +155,9 @@ Capabilities form a 14-bit bitmap:
 | 2 | Select MT-32 ROM set |
 | 3 | Select SoundFont |
 | 4 | USB MIDI output (`SET_USB_OUT`) |
+| 5 | Settings (`SET_PARAMETER`) |
+| 6 | Save settings (`SAVE`) |
+| 7 | Sound-parameter protocol (`GET_INFO`, commands `07` onwards) |
 
 Availability bit 0 means MT-32/Munt is available; bit 1 means
 SoundFont/FluidSynth is available; bit 2 means OPL3/libADLMIDI is available. Synth and ROM use the values listed above.
@@ -172,3 +175,24 @@ is represented by `7F` for synth/ROM and `7F 7F` for SoundFont.
 - After reconnecting or detecting an unknown state, clients issue `GET_STATUS`.
 - The resident Next driver transports bytes without blocking; timeout and retry
   policy belongs in the Golem client library.
+
+## Sound-parameter commands
+
+Commands `07` onwards (capability bit 7) are the sound-parameter protocol,
+specified in golem-next `docs/sound-params.md`. They use the same frame and
+version byte; each starts with a flags byte and ends with a Roland checksum,
+and they have their own replies (`44 INFO`, `45 DATA`) and error codes
+(`07`-`0B`). The firmware implements `GET_INFO` (`07`), `PARAM_WRITE` (`08`),
+`PARAM_READ` (`09`) and `BLOB` (`0C`) for:
+
+- area `01`: OPL3 instruments, 128 bytes each, of the working bank;
+- area `02`: the OPL3 bank directory and header;
+- area `10`: settings, section `00` (the `SET_PARAMETER` values at `00`-`06`,
+  read-only state at `20`-`26`) and section `03` (OPL3 emulator, chips, gain);
+- `BLOB` type `01`: the working bank as a WOPL file (WOPLX when it carries the
+  Golem extras), read out or uploaded.
+
+The OPL3 working bank is what the engine plays. Edits are heard at once,
+survive GM System On and the stop sweep, and last until another bank is
+chosen (`SET_PARAMETER` 5, `.golem bank`). The other areas and commands
+answer "address" (`08`) or "unknown command" (`03`) until they exist.

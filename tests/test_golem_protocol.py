@@ -192,6 +192,14 @@ class GolemProtocolVectors(unittest.TestCase):
             bytes.fromhex("F0 7D 47 4C 4D 01 12 43 00 7F 00 07 02 02 7F 03 F7"),
         )
 
+    def test_capabilities_with_get_info(self):
+        # bit 7 (sound-parameter protocol) is the low bit of cap-high
+        payload = (0x7F, 0x01, 0x07, SYNTH_OPL3, 0x02, 0x7F, 0x03)
+        self.assertEqual(
+            response(0x12, STATUS, GET_STATUS, payload),
+            bytes.fromhex("F0 7D 47 4C 4D 01 12 43 00 7F 01 07 02 02 7F 03 F7"),
+        )
+
     def test_rejects_non_seven_bit_payload(self):
         with self.assertRaises(ValueError):
             request(0x12, SET_SYNTH, (0x80,))

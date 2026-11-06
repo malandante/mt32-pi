@@ -80,6 +80,13 @@ jobs:
             build-adlmidi-host/libADLMIDI.a -o test_opl3midi
           ./test_opl3midi
 
+      - name: Sound-parameter protocol (OPL3 working bank, WOPLX, framing)
+        run: |
+          g++ -std=c++14 -Wall -Wextra -Werror -Iinclude -Iexternal/libadlmidi/include -Iexternal/libadlmidi/src/wopl \
+            tests/test_golemparams.cpp src/golem/oplbank.cpp src/golem/opl3work.cpp src/golem/params.cpp \
+            build-adlmidi-host/libADLMIDI.a -o test_golemparams
+          ./test_golemparams
+
   build:
     runs-on: ubuntu-latest
     name: build-${{ matrix.board }}

@@ -29,8 +29,11 @@
 #include <circle/string.h>
 #include <circle/types.h>
 
+#include <vector>
+
 #include <adlmidi.h>
 
+#include "golem/opl3work.h"
 #include "synth/opl3midi.h"
 #include "synth/synthbase.h"
 
@@ -62,6 +65,26 @@ public:
 	const char* GetBankName(int nBank) const;
 	const char* GetEmulatorName() const;
 
+	// The working bank (golem-next docs/sound-params.md 6.5): what sounds, as
+	// a WOPL bank in memory, for the parameter protocol. Main task only.
+	const golem::OPLBank* GetWorkingBank();
+	bool HasWorkingBankChanges() const { return m_Work.Changed(); }
+	// Area 01 and 02 writes: whole records, the playing player updated live
+	// where libADLMIDI allows it, otherwise built again
+	u8 WriteRecords(int nFirstRecord, int nCount, const u8* pRecords, size_t& nBad);
+	u8 WriteDirectory(u32 nAddress, const u8* pData, size_t nSize, size_t& nBad);
+	// An uploaded bank (BLOB): becomes the working bank
+	bool UploadBank(golem::OPLBank&& Bank);
+
+	// Engine settings (area 10, section 03)
+	bool IsDOSBox() const { return m_nEmulator == ADLMIDI_EMU_DOSBOX; }
+	int GetChips() const { return m_nChips; }
+	float GetGain() const { return m_nGain; }
+	void SetEmulator(bool bDOSBox);
+	void SetChips(int nChips);
+	void SetGain(float nGain) { m_nGain = nGain; }
+	int GetFourOpChannels();
+
 private:
 	struct TBankFile
 	{
@@ -71,6 +94,10 @@ private:
 
 	void ScanBankFiles();
 	ADL_MIDIPlayer* CreatePlayer(int nBank) const;
+	ADL_MIDIPlayer* CreatePlayer(const u8* pData, size_t nSize) const;
+	bool ReadBankFile(int nBank, std::vector<u8>& Data) const;
+	ADL_MIDIPlayer* NewWorkingPlayer() const;
+	void SwapPlayer(ADL_MIDIPlayer* pPlayer);
 	void Rebuild();
 
 	ADL_MIDIPlayer* m_pPlayer;
@@ -85,6 +112,7 @@ private:
 	volatile bool m_bActive;
 	unsigned int m_nSilentFrames;
 	OPL3MIDI::TSoundOffSweep m_SoundOffSweep;
+	golem::OPL3Work m_Work;
 };
 
 #endif

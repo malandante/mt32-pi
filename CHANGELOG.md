@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Sound-parameter protocol (golem-next `docs/sound-params.md`), OPL3 part,
+  the same as golemd's: `GET_INFO` (0x07, capability bit 7), `PARAM_WRITE`
+  (0x08), `PARAM_READ` (0x09) and `BLOB` (0x0C). The OPL3 instruments of the
+  working bank can be read and edited one by one (area 01, heard at once), as
+  can the bank directory and header (area 02); the whole bank can be read out
+  or uploaded as a WOPL or WOPLX file. Area 10 shares the `SET_PARAMETER`
+  settings and adds the OPL3 emulator, chips and gain.
+- The OPL3 working bank: edits and an uploaded bank survive GM System On (sent
+  before each song) and the stop sweep, until another bank is chosen.
+
 ## [golem-1.2.0] - 2026-10-21
 
 For golem-next 1.2.0. golem-1.1.0 was never published: its changes are here.

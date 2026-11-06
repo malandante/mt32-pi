@@ -5,6 +5,9 @@
 include Config.mk
 
 OBJS		:=	src/config.o \
+			src/golem/oplbank.o \
+			src/golem/opl3work.o \
+			src/golem/params.o \
 			src/control/control.o \
 			src/control/mister.o \
 			src/control/rotaryencoder.o \
@@ -21,6 +24,7 @@ OBJS		:=	src/config.o \
 			src/midimonitor.o \
 			src/midiparser.o \
 			src/mt32pi.o \
+			src/mt32pi_params.o \
 			src/nextaudioinput.o \
 			src/net/applemidi.o \
 			src/net/ftpdaemon.o \
@@ -37,6 +41,7 @@ OBJS		:=	src/config.o \
 
 EXTRACLEAN	+=	src/*.d src/*.o \
 			src/control/*.d src/control/*.o \
+			src/golem/*.d src/golem/*.o \
 			src/lcd/*.d src/lcd/*.o \
 			src/lcd/drivers/*.d src/lcd/drivers/*.o \
 			src/net/*.d src/net/*.o \
@@ -87,6 +92,8 @@ INCLUDE		+=	-I $(FLUIDSYNTHBUILDDIR)/include \
 EXTRALIBS	+=	$(FLUIDSYNTHLIB)
 
 INCLUDE		+=	-I $(ADLMIDIHOME)/include
+# Its WOPL reader and writer (the Golem working bank)
+INCLUDE		+=	-I $(ADLMIDIHOME)/src/wopl
 EXTRALIBS	+=	$(ADLMIDILIB)
 
 #

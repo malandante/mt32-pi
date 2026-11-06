@@ -159,32 +159,65 @@ void COPL3Synth::ScanBankFiles()
 		LOGNOTE("Bank %d: %s", m_nEmbeddedBanks + i, static_cast<const char*>(m_BankFiles[i].Path));
 }
 
-ADL_MIDIPlayer* COPL3Synth::CreatePlayer(int nBank) const
+// A bank file, read whole into memory
+bool COPL3Synth::ReadBankFile(int nBank, std::vector<u8>& Data) const
 {
-	if (nBank < m_nEmbeddedBanks)
-		return OPL3MIDI::NewPlayer(m_nSampleRate, m_nEmulator, m_nChips, nBank);
-
-	// A bank file, read whole into memory; libADLMIDI copies the instruments
+	if (nBank < m_nEmbeddedBanks || nBank >= GetBankCount())
+		return false;
 	const char* pPath = m_BankFiles[nBank - m_nEmbeddedBanks].Path;
 	FIL File;
 	if (f_open(&File, pPath, FA_READ) != FR_OK)
 	{
 		LOGERR("Cannot open %s", pPath);
-		return nullptr;
+		return false;
 	}
 
 	const FSIZE_t nSize = f_size(&File);
-	u8* pData = nSize > 0 && nSize <= MaxBankFileSize ? new u8[nSize] : nullptr;
-	UINT nRead = 0;
-	const bool bRead = pData && f_read(&File, pData, nSize, &nRead) == FR_OK && nRead == nSize;
+	bool bRead = nSize > 0 && nSize <= MaxBankFileSize;
+	if (bRead)
+	{
+		Data.resize(nSize);
+		UINT nRead = 0;
+		bRead = f_read(&File, Data.data(), nSize, &nRead) == FR_OK && nRead == nSize;
+	}
 	f_close(&File);
+	return bRead;
+}
 
-	ADL_MIDIPlayer* pPlayer = bRead ? OPL3MIDI::NewPlayer(m_nSampleRate, m_nEmulator, m_nChips, 0, pData, nSize) : nullptr;
-	delete[] pData;
+ADL_MIDIPlayer* COPL3Synth::CreatePlayer(int nBank) const
+{
+	if (nBank < m_nEmbeddedBanks)
+		return OPL3MIDI::NewPlayer(m_nSampleRate, m_nEmulator, m_nChips, nBank);
 
+	// libADLMIDI copies the instruments
+	std::vector<u8> Data;
+	ADL_MIDIPlayer* pPlayer = ReadBankFile(nBank, Data) ? CreatePlayer(Data.data(), Data.size()) : nullptr;
 	if (!pPlayer)
-		LOGERR("%s is not a valid WOPL bank", pPath);
+		LOGERR("%s is not a valid WOPL bank", static_cast<const char*>(m_BankFiles[nBank - m_nEmbeddedBanks].Path));
 	return pPlayer;
+}
+
+ADL_MIDIPlayer* COPL3Synth::CreatePlayer(const u8* pData, size_t nSize) const
+{
+	return OPL3MIDI::NewPlayer(m_nSampleRate, m_nEmulator, m_nChips, 0, pData, nSize);
+}
+
+// A player that sounds like the working bank (the chosen bank while nothing
+// has been edited or uploaded)
+ADL_MIDIPlayer* COPL3Synth::NewWorkingPlayer() const
+{
+	return m_Work.NewPlayer([this] { return CreatePlayer(m_nBank); },
+	                        [this](const uint8_t* pData, size_t nSize) { return CreatePlayer(pData, nSize); });
+}
+
+// Built outside the lock (a file takes a moment to read), swapped under it
+void COPL3Synth::SwapPlayer(ADL_MIDIPlayer* pPlayer)
+{
+	m_Lock.Acquire();
+	ADL_MIDIPlayer* const pOldPlayer = m_pPlayer;
+	m_pPlayer = pPlayer;
+	m_Lock.Release();
+	adl_close(pOldPlayer);
 }
 
 void COPL3Synth::HandleMIDIShortMessage(u32 nMessage)
@@ -223,17 +256,12 @@ void COPL3Synth::HandleMIDISysExMessage(const u8* pData, size_t nSize)
 	m_Lock.Release();
 }
 
+// From the working bank, so edits and an uploaded bank survive the stop
+// sweep and GM System On
 void COPL3Synth::Rebuild()
 {
-	ADL_MIDIPlayer* const pPlayer = CreatePlayer(m_nBank);
-	if (!pPlayer)
-		return;
-
-	m_Lock.Acquire();
-	ADL_MIDIPlayer* const pOldPlayer = m_pPlayer;
-	m_pPlayer = pPlayer;
-	m_Lock.Release();
-	adl_close(pOldPlayer);
+	if (ADL_MIDIPlayer* const pPlayer = NewWorkingPlayer())
+		SwapPlayer(pPlayer);
 }
 
 void COPL3Synth::AllSoundOff()
@@ -321,6 +349,9 @@ bool COPL3Synth::SetBank(int nBank)
 	m_Lock.Release();
 	adl_close(pOldPlayer);
 
+	// A bank chosen explicitly replaces the working bank
+	m_Work.Reset();
+
 	m_MIDIMonitor.AllNotesOff();
 	m_MIDIMonitor.ResetControllers(false);
 	LOGNOTE("Bank %d: %s", m_nBank, GetBankName(m_nBank));
@@ -339,4 +370,93 @@ const char* COPL3Synth::GetBankName(int nBank) const
 const char* COPL3Synth::GetEmulatorName() const
 {
 	return m_pPlayer ? adl_chipEmulatorName(m_pPlayer) : "none";
+}
+
+const golem::OPLBank* COPL3Synth::GetWorkingBank()
+{
+	if (m_Work.Made())
+		return &m_Work.Bank();
+
+	// An embedded bank has no file: read from a player of its own, so the
+	// playing one (and the audio task) is left alone
+	const bool bEmbedded = m_nBank < m_nEmbeddedBanks;
+	ADL_MIDIPlayer* const pPlayer = bEmbedded ? CreatePlayer(m_nBank) : nullptr;
+	const golem::OPLBank* pBank = m_Work.Get(pPlayer, bEmbedded,
+	                                         [this](std::vector<uint8_t>& Data) { return ReadBankFile(m_nBank, Data); });
+	if (pPlayer)
+		adl_close(pPlayer);
+	if (!pBank)
+		LOGERR("Cannot make the working bank from bank %d", m_nBank);
+	return pBank;
+}
+
+u8 COPL3Synth::WriteRecords(int nFirstRecord, int nCount, const u8* pRecords, size_t& nBad)
+{
+	if (!GetWorkingBank())
+		return 0x06;
+	std::vector<int> Live;
+	const u8 nError = m_Work.WriteRecords(nFirstRecord, nCount, pRecords, nBad, Live);
+	if (nError)
+		return nError;
+
+	// Heard at once, without a new player
+	m_Lock.Acquire();
+	for (const int nKey : Live)
+		m_Work.Apply(m_pPlayer, nKey);
+	m_Lock.Release();
+	return 0;
+}
+
+u8 COPL3Synth::WriteDirectory(u32 nAddress, const u8* pData, size_t nSize, size_t& nBad)
+{
+	if (!GetWorkingBank())
+		return 0x06;
+	bool bNewPlayer = false;
+	const u8 nError = m_Work.WriteDirectory(nAddress, pData, nSize, nBad, bNewPlayer);
+	if (nError == 0 && bNewPlayer)
+		Rebuild();
+	return nError;
+}
+
+bool COPL3Synth::UploadBank(golem::OPLBank&& Bank)
+{
+	ADL_MIDIPlayer* const pPlayer =
+		m_Work.PrepareFrom(Bank, [this](const uint8_t* pData, size_t nSize) { return CreatePlayer(pData, nSize); });
+	if (!pPlayer)
+		return false;
+	SwapPlayer(pPlayer);
+	m_Work.SetUploaded(std::move(Bank));
+	m_MIDIMonitor.AllNotesOff();
+	m_MIDIMonitor.ResetControllers(false);
+	LOGNOTE("Working bank uploaded (%d melodic, %d percussion banks)", m_Work.Bank().MelodicBanks(),
+	        m_Work.Bank().PercussionBanks());
+	return true;
+}
+
+void COPL3Synth::SetEmulator(bool bDOSBox)
+{
+	const int nEmulator = bDOSBox ? ADLMIDI_EMU_DOSBOX : ADLMIDI_EMU_NUKED;
+	if (nEmulator == m_nEmulator)
+		return;
+	m_nEmulator = nEmulator;
+	Rebuild();
+	LOGNOTE("Emulator: %s", GetEmulatorName());
+}
+
+void COPL3Synth::SetChips(int nChips)
+{
+	nChips = nChips < 1 ? 1 : nChips > 4 ? 4 : nChips;
+	if (nChips == m_nChips)
+		return;
+	m_nChips = nChips;
+	Rebuild();
+	LOGNOTE("%d chip(s)", m_nChips);
+}
+
+int COPL3Synth::GetFourOpChannels()
+{
+	m_Lock.Acquire();
+	const int nChannels = m_pPlayer ? adl_getNumFourOpsChnObtained(m_pPlayer) : 0;
+	m_Lock.Release();
+	return nChannels;
 }
