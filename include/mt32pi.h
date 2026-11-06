@@ -52,6 +52,7 @@
 #include "control/control.h"
 #include "control/mister.h"
 #include "event.h"
+#include "golem/params.h"
 #include "lcd/ui.h"
 #include "loudness.h"
 #include "midiparser.h"
@@ -71,7 +72,7 @@
 
 //#define MONITOR_TEMPERATURE
 
-class CMT32Pi : CMultiCoreSupport, CPower, CMIDIParser, CAppleMIDIHandler, CUDPMIDIHandler
+class CMT32Pi : CMultiCoreSupport, CPower, CMIDIParser, CAppleMIDIHandler, CUDPMIDIHandler, golem::ParamHost
 {
 public:
 	CMT32Pi(CI2CMaster* pI2CMaster, CSPIMaster* pSPIMaster, CInterruptSystem* pInterrupt, CGPIOManager* pGPIOManager, CMIDISerialDevice* pSerialDevice, CUSBHCIDevice* pUSBHCI);
@@ -168,6 +169,25 @@ private:
 	void SendGolemStatus(u8 nTransaction);
 	bool SaveGolemSettings();
 	bool ClearGolemSettings();
+
+	// SET_PARAMETER settings, shared with area 10 of the parameter protocol.
+	// False: no such parameter; bAvailable false: its engine is missing.
+	bool GetGolemParameterLimits(u8 nParameter, u8& nMax, bool& bAvailable) const;
+	u8 GetGolemParameter(u8 nParameter);
+	void SetGolemParameter(u8 nParameter, u8 nValue);
+
+	// Sound-parameter protocol (golem-next docs/sound-params.md), commands 07
+	// onwards; mt32pi_params.cpp
+	bool SendGolemFrame(const u8* pData, size_t nSize);
+	virtual golem::ParamInfo Info() override;
+	virtual u8 AreaRead(u8 nArea, uint32_t nAddress, size_t nSize, std::vector<u8>& Out) override;
+	virtual u8 AreaWrite(u8 nArea, uint32_t nAddress, const u8* pData, size_t nSize, size_t& nBad) override;
+	virtual u8 BlobCommit(u8 nType, u8 nTarget, std::vector<u8>&& File) override;
+	virtual u8 BlobGet(u8 nType, u8 nOrigin, std::vector<u8>& File) override;
+	u8 ReadSetting(u32 nSection, u32 nParameter, u8& nValue);
+	u8 WriteSettings(u32 nAddress, const u8* pData, size_t nSize, size_t& nBad);
+	u8 ReadOPL3(u8 nArea, u32 nAddress, size_t nSize, std::vector<u8>& Out);
+	u8 WriteOPL3(u8 nArea, u32 nAddress, const u8* pData, size_t nSize, size_t& nBad);
 
 	void ProcessEventQueue();
 	void ProcessButtonEvent(const TButtonEvent& Event);
@@ -276,6 +296,9 @@ private:
 
 	// Event handling
 	TEventQueue m_EventQueue;
+
+	// Sound-parameter protocol: answers to the GPIO serial port
+	golem::ParamProtocol m_ParamProtocol;
 
 	static void EventHandler(const TEvent& Event);
 	static void USBMIDIDeviceRemovedHandler(CDevice* pDevice, void* pContext);

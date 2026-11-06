@@ -103,6 +103,7 @@ enum TGolemCapability : u16
 	GolemCapabilitySetUSBOut    = 1 << 4,
 	GolemCapabilitySetParameter = 1 << 5,
 	GolemCapabilitySave         = 1 << 6,
+	GolemCapabilityGetInfo      = 1 << 7,	// sound-parameter protocol (commands 07 onwards)
 };
 
 // SAVE payload
@@ -201,7 +202,8 @@ CMT32Pi::CMT32Pi(CI2CMaster* pI2CMaster, CSPIMaster* pSPIMaster, CInterruptSyste
 	  m_USBSerialMIDIParser(this),
 	  m_USBOutMode(CConfig::TMIDIUSBOut::Off),
 	  m_nKeysToNextDropped(0),
-	  m_nUSBTxDroppedReported(0)
+	  m_nUSBTxDroppedReported(0),
+	  m_ParamProtocol(*this, [this](const uint8_t* pData, size_t nSize) { SendGolemFrame(pData, nSize); })
 {
 	s_pThis = this;
 }
@@ -1163,6 +1165,13 @@ bool CMT32Pi::ParseGolemSysEx(const u8* pData, size_t nSize)
 		return true;
 	}
 
+	// Sound-parameter commands: flags byte, checksum, their own replies
+	if (nCommand >= golem::param::GetInfo)
+	{
+		m_ParamProtocol.Handle(pData, nSize);
+		return true;
+	}
+
 	switch (Command)
 	{
 		case TGolemCommand::GetStatus:
@@ -1308,103 +1317,30 @@ bool CMT32Pi::ParseGolemSysEx(const u8* pData, size_t nSize)
 				return true;
 			}
 
-			const auto Parameter = static_cast<TGolemParameter>(pData[8]);
-			const u8 nValue      = pData[9];
-			const bool bQuery    = nValue == GolemParameterQuery;
+			const u8 nParameter = pData[8];
+			const u8 nValue     = pData[9];
+			const bool bQuery   = nValue == GolemParameterQuery;
 			u8 nMax;
+			bool bAvailable;
 
-			switch (Parameter)
-			{
-				case TGolemParameter::Volume:       nMax = 100; break;
-				case TGolemParameter::Effects:
-				case TGolemParameter::MIDIChannels:
-				case TGolemParameter::USBInThru:
-				case TGolemParameter::KeysToNext:
-				case TGolemParameter::Loudness:     nMax = 1;   break;
-				case TGolemParameter::OPL3Bank:     nMax = static_cast<u8>(m_pOPL3Synth ? m_pOPL3Synth->GetBankCount() - 1 : 127); break;
-				default:
-					SendGolemError(nTransaction, nCommand, static_cast<u8>(TGolemError::InvalidParameter));
-					return true;
-			}
-
-			if (!bQuery && nValue > nMax)
+			if (!GetGolemParameterLimits(nParameter, nMax, bAvailable) || (!bQuery && nValue > nMax))
 			{
 				SendGolemError(nTransaction, nCommand, static_cast<u8>(TGolemError::InvalidParameter));
 				return true;
 			}
 
-			if ((Parameter == TGolemParameter::Effects && !m_pSoundFontSynth) ||
-			    (Parameter == TGolemParameter::MIDIChannels && !m_pMT32Synth) ||
-			    (Parameter == TGolemParameter::OPL3Bank && !m_pOPL3Synth))
+			if (!bAvailable)
 			{
 				SendGolemError(nTransaction, nCommand, static_cast<u8>(TGolemError::Unavailable));
 				return true;
 			}
 
 			SendGolemResponse(nTransaction, static_cast<u8>(TGolemResponse::Accepted), nCommand);
+			if (!bQuery)
+				SetGolemParameter(nParameter, nValue);
+			const u8 nCurrent = GetGolemParameter(nParameter);
 
-			u8 nCurrent = 0;
-			switch (Parameter)
-			{
-				case TGolemParameter::Volume:
-					if (!bQuery)
-						SetMasterVolume(nValue);
-					nCurrent = m_nMasterVolume;
-					break;
-
-				case TGolemParameter::Effects:
-					if (!bQuery)
-					{
-						m_pSoundFontSynth->SetEffects(nValue);
-						LCDLog(TLCDLogType::Notice, "Effects: %s", nValue ? "on" : "off");
-					}
-					nCurrent = m_pSoundFontSynth->GetEffects();
-					break;
-
-				case TGolemParameter::MIDIChannels:
-					if (!bQuery)
-					{
-						m_pMT32Synth->SetMIDIChannels(nValue ? CMT32Synth::TMIDIChannels::Alternate : CMT32Synth::TMIDIChannels::Standard);
-						LCDLog(TLCDLogType::Notice, "MT-32 ch: %s", nValue ? "1-8,10" : "2-10");
-					}
-					nCurrent = m_pMT32Synth->GetMIDIChannels() == CMT32Synth::TMIDIChannels::Alternate;
-					break;
-
-				case TGolemParameter::USBInThru:
-					if (!bQuery)
-					{
-						m_pConfig->MIDIUSBInThru = nValue;
-						LCDLog(TLCDLogType::Notice, "USB in thru: %s", nValue ? "on" : "off");
-					}
-					nCurrent = m_pConfig->MIDIUSBInThru;
-					break;
-
-				case TGolemParameter::KeysToNext:
-					if (!bQuery)
-					{
-						m_pConfig->GolemKeysToNext = nValue;
-						LCDLog(TLCDLogType::Notice, "Keys to Next: %s", nValue ? "on" : "off");
-					}
-					nCurrent = m_pConfig->GolemKeysToNext;
-					break;
-
-				case TGolemParameter::Loudness:
-					if (!bQuery)
-					{
-						m_bLoudness = nValue;
-						LCDLog(TLCDLogType::Notice, "Loudness: %s", nValue ? "on" : "off");
-					}
-					nCurrent = m_bLoudness;
-					break;
-
-				case TGolemParameter::OPL3Bank:
-					if (!bQuery && m_pOPL3Synth->SetBank(nValue))
-						LCDLog(TLCDLogType::Notice, "OPL3 bank %d", nValue);
-					nCurrent = static_cast<u8>(m_pOPL3Synth->GetBank());
-					break;
-			}
-
-			const u8 Payload[] = {static_cast<u8>(Parameter), nCurrent};
+			const u8 Payload[] = {nParameter, nCurrent};
 			SendGolemResponse(nTransaction, static_cast<u8>(TGolemResponse::Ready), nCommand, Payload, sizeof(Payload));
 			return true;
 		}
@@ -1532,6 +1468,97 @@ bool CMT32Pi::ClearGolemSettings()
 	return true;
 }
 
+bool CMT32Pi::GetGolemParameterLimits(u8 nParameter, u8& nMax, bool& bAvailable) const
+{
+	bAvailable = true;
+	switch (static_cast<TGolemParameter>(nParameter))
+	{
+		case TGolemParameter::Volume:
+			nMax = 100;
+			return true;
+
+		case TGolemParameter::Effects:
+			nMax = 1;
+			bAvailable = m_pSoundFontSynth != nullptr;
+			return true;
+
+		case TGolemParameter::MIDIChannels:
+			nMax = 1;
+			bAvailable = m_pMT32Synth != nullptr;
+			return true;
+
+		case TGolemParameter::USBInThru:
+		case TGolemParameter::KeysToNext:
+		case TGolemParameter::Loudness:
+			nMax = 1;
+			return true;
+
+		case TGolemParameter::OPL3Bank:
+			nMax = static_cast<u8>(m_pOPL3Synth ? m_pOPL3Synth->GetBankCount() - 1 : 127);
+			bAvailable = m_pOPL3Synth != nullptr;
+			return true;
+
+		default:
+			return false;
+	}
+}
+
+u8 CMT32Pi::GetGolemParameter(u8 nParameter)
+{
+	switch (static_cast<TGolemParameter>(nParameter))
+	{
+		case TGolemParameter::Volume:       return m_nMasterVolume;
+		case TGolemParameter::Effects:      return m_pSoundFontSynth && m_pSoundFontSynth->GetEffects();
+		case TGolemParameter::MIDIChannels: return m_pMT32Synth && m_pMT32Synth->GetMIDIChannels() == CMT32Synth::TMIDIChannels::Alternate;
+		case TGolemParameter::USBInThru:    return m_pConfig->MIDIUSBInThru;
+		case TGolemParameter::KeysToNext:   return m_pConfig->GolemKeysToNext;
+		case TGolemParameter::Loudness:     return m_bLoudness;
+		case TGolemParameter::OPL3Bank:     return m_pOPL3Synth ? static_cast<u8>(m_pOPL3Synth->GetBank()) : 0;
+		default:                            return 0;
+	}
+}
+
+// The value already checked against GetGolemParameterLimits()
+void CMT32Pi::SetGolemParameter(u8 nParameter, u8 nValue)
+{
+	switch (static_cast<TGolemParameter>(nParameter))
+	{
+		case TGolemParameter::Volume:
+			SetMasterVolume(nValue);
+			break;
+
+		case TGolemParameter::Effects:
+			m_pSoundFontSynth->SetEffects(nValue);
+			LCDLog(TLCDLogType::Notice, "Effects: %s", nValue ? "on" : "off");
+			break;
+
+		case TGolemParameter::MIDIChannels:
+			m_pMT32Synth->SetMIDIChannels(nValue ? CMT32Synth::TMIDIChannels::Alternate : CMT32Synth::TMIDIChannels::Standard);
+			LCDLog(TLCDLogType::Notice, "MT-32 ch: %s", nValue ? "1-8,10" : "2-10");
+			break;
+
+		case TGolemParameter::USBInThru:
+			m_pConfig->MIDIUSBInThru = nValue;
+			LCDLog(TLCDLogType::Notice, "USB in thru: %s", nValue ? "on" : "off");
+			break;
+
+		case TGolemParameter::KeysToNext:
+			m_pConfig->GolemKeysToNext = nValue;
+			LCDLog(TLCDLogType::Notice, "Keys to Next: %s", nValue ? "on" : "off");
+			break;
+
+		case TGolemParameter::Loudness:
+			m_bLoudness = nValue;
+			LCDLog(TLCDLogType::Notice, "Loudness: %s", nValue ? "on" : "off");
+			break;
+
+		case TGolemParameter::OPL3Bank:
+			if (m_pOPL3Synth->SetBank(nValue))
+				LCDLog(TLCDLogType::Notice, "OPL3 bank %d", nValue);
+			break;
+	}
+}
+
 bool CMT32Pi::SendGolemResponse(u8 nTransaction, u8 nResponse, u8 nCommand, const u8* pPayload, size_t nPayloadSize)
 {
 	if (!m_bSerialMIDIEnabled || m_pSerial == nullptr || nPayloadSize > GolemMaxPayload)
@@ -1577,7 +1604,8 @@ void CMT32Pi::SendGolemStatus(u8 nTransaction)
 	                             GolemCapabilitySetSoundFont |
 	                             GolemCapabilitySetUSBOut |
 	                             GolemCapabilitySetParameter |
-	                             GolemCapabilitySave;
+	                             GolemCapabilitySave |
+	                             GolemCapabilityGetInfo;
 
 	u8 nAvailability = 0;
 	if (m_pMT32Synth)
