@@ -289,6 +289,19 @@ int CSoundFontManager::INIHandler(void* pUser, const char* pSection, const char*
 	MATCH("chorus_level", float, nChorusLevel);
 	MATCH("chorus_voices", int, nChorusVoices);
 	MATCH("chorus_speed", float, nChorusSpeed);
+	MATCH("polyphony", int, nPolyphony);
+
+	// Golem: written as a word by .cfg files the Golem hands out
+	if (!strcmp("chorus_type", pName))
+	{
+		if (!strcasecmp(pValue, "sine") || !strcmp(pValue, "0"))
+			pFXProfile->nChorusType = 0;
+		else if (!strcasecmp(pValue, "triangle") || !strcmp(pValue, "1"))
+			pFXProfile->nChorusType = 1;
+		else
+			return 0;
+		return 1;
+	}
 
 	#undef MATCH
 	return 0;

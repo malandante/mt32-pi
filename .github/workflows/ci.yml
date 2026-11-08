@@ -93,6 +93,12 @@ jobs:
             -o test_mt32mem
           ./test_mt32mem
 
+      - name: Sound-parameter protocol (FluidSynth effects and profiles)
+        run: |
+          g++ -std=c++14 -Wall -Wextra -Werror -Iinclude tests/test_fxparams.cpp src/golem/fxparams.cpp src/golem/params.cpp \
+            -o test_fxparams
+          ./test_fxparams
+
   build:
     runs-on: ubuntu-latest
     name: build-${{ matrix.board }}

@@ -6,8 +6,9 @@
 // src/engine_params.cpp). Implemented: area 00 (the MT-32's memory), 01
 // (OPL3 instruments), 02 (OPL3 bank directory and header), 04 (the MT-32's
 // ROM timbres), 10 sections 00 (general, with the SET_PARAMETER settings), 01
-// (MT-32 engine) and 03 (OPL3 engine), BLOB with WOPL/WOPLX banks and MT-32
-// dumps, and native RQ1. Other areas and addresses answer "address" (08)
+// (MT-32 engine), 02 (FluidSynth effects) and 03 (OPL3 engine), BLOB with
+// WOPL/WOPLX banks, FluidSynth effects profiles and MT-32 dumps, and native
+// RQ1. Other areas and addresses answer "address" (08)
 // until they exist.
 //
 // This file is part of mt32-pi.
@@ -206,6 +207,13 @@ u8 CMT32Pi::ReadSetting(u32 nSection, u32 p, u8& v)
 	if (nSection == 1)
 		return ReadMT32Setting(p, v);
 
+	if (nSection == 2)
+	{
+		if (!m_pSoundFontSynth)
+			return golem::param::Unavailable;
+		return golem::fxparams::Read(m_pSoundFontSynth->GetFX(), p, v);
+	}
+
 	if (nSection == 3)
 	{
 		if (!m_pOPL3Synth)
@@ -247,6 +255,24 @@ u8 CMT32Pi::WriteSettings(u32 nAddress, const u8* p, size_t n, size_t& nBad)
 	const u32 nSection = Section(nAddress);
 	if (nSection == 1)
 		return WriteMT32Settings(nAddress, p, n, nBad);
+	if (nSection == 2)
+	{
+		nBad = 0;
+		if (!m_pSoundFontSynth)
+			return golem::param::Unavailable;
+		// One section, parameter byte only (ss 00 pp)
+		if (Section(nAddress + static_cast<u32>(n) - 1) != 2 || ((nAddress >> 7) & 0x7F) != 0 ||
+		    (nAddress & 0x7F) + n - 1 > golem::fxparams::Last)
+		{
+			nBad = (nAddress & 0x7F) > golem::fxparams::Last ? 0 : golem::fxparams::Last + 1 - (nAddress & 0x7F);
+			return golem::param::BadAddress;
+		}
+		golem::FXSettings FX = m_pSoundFontSynth->GetFX();
+		const u8 nError = golem::fxparams::Write(FX, nAddress & 0x7F, p, n, nBad);
+		if (nError == golem::param::OK)
+			m_pSoundFontSynth->SetFX(FX);
+		return nError;
+	}
 	for (size_t i = 0; i < n; ++i)
 	{
 		const u32 a  = nAddress + static_cast<u32>(i);
@@ -394,6 +420,21 @@ u8 CMT32Pi::WriteOPL3(u8 nArea, u32 nAddress, const u8* p, size_t n, size_t& nBa
 
 u8 CMT32Pi::BlobCommit(u8 nType, u8 nTarget, std::vector<u8>&& File)
 {
+	if (nType == golem::param::BlobFX && nTarget == 0)
+	{
+		if (!m_pSoundFontSynth)
+			return golem::param::Unavailable;
+		golem::FXSettings FX = m_pSoundFontSynth->GetFX();
+		size_t nLine = 0;
+		if (!golem::fxparams::FromConfig(reinterpret_cast<const char*>(File.data()), File.size(), FX, nLine))
+		{
+			LOGWARN("Effects profile refused at line %u", static_cast<unsigned>(nLine));
+			return golem::param::BadValue;
+		}
+		m_pSoundFontSynth->SetFX(FX);
+		return golem::param::OK;
+	}
+
 	if (nType == golem::param::BlobMT32 && nTarget == 0)
 	{
 		if (!m_pMT32Synth)
@@ -422,6 +463,15 @@ u8 CMT32Pi::BlobCommit(u8 nType, u8 nTarget, std::vector<u8>&& File)
 
 u8 CMT32Pi::BlobGet(u8 nType, u8 nOrigin, std::vector<u8>& File)
 {
+	if (nType == golem::param::BlobFX && nOrigin == 0)
+	{
+		if (!m_pSoundFontSynth)
+			return golem::param::Unavailable;
+		const std::string Text = golem::fxparams::ToConfig(m_pSoundFontSynth->GetFX());
+		File.assign(Text.begin(), Text.end());
+		return golem::param::OK;
+	}
+
 	if (nType == golem::param::BlobMT32 && nOrigin == 0)
 	{
 		if (!m_pMT32Synth)

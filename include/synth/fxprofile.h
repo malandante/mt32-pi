@@ -40,6 +40,8 @@ struct TFXProfile
 	TOptional<float> nChorusLevel;
 	TOptional<int> nChorusVoices;
 	TOptional<float> nChorusSpeed;
+	TOptional<int> nChorusType; // 0 sine, 1 triangle (Golem)
+	TOptional<int> nPolyphony;  // Golem
 };
 
 #endif
