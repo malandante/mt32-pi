@@ -51,6 +51,8 @@ CMT32Synth::CMT32Synth(unsigned nSampleRate, float nGain, float nReverbGain, TRe
 	  m_ResamplerQuality(ResamplerQuality),
 	  m_MIDIChannels(TMIDIChannels::Standard),
 	  m_nMasterVolume(100),
+	  m_bReversedStereo(false),
+	  m_nReverbMode(0),
 	  m_pSampleRateConverter(nullptr),
 
 	  m_CurrentROMSet(TMT32ROMSet::Any),
@@ -89,6 +91,19 @@ bool CMT32Synth::Initialize()
 		return false;
 
 	ApplyOutputGain();
+	CreateConverter();
+
+	return true;
+}
+
+// Munt renders at 32 kHz; the converter takes it to the output rate
+void CMT32Synth::CreateConverter()
+{
+	if (m_pSampleRateConverter)
+	{
+		delete m_pSampleRateConverter;
+		m_pSampleRateConverter = nullptr;
+	}
 
 	if (m_ResamplerQuality != TResamplerQuality::None)
 	{
@@ -117,8 +132,66 @@ bool CMT32Synth::Initialize()
 
 		m_pSampleRateConverter = new MT32Emu::SampleRateConverter(*m_pSynth, m_nSampleRate, quality);
 	}
+}
 
+void CMT32Synth::SetReversedStereo(bool bEnabled)
+{
+	m_bReversedStereo = bEnabled;
+	m_pSynth->setReversedStereoEnabled(bEnabled);
+}
+
+void CMT32Synth::ReadMemory(u32 nAddress, size_t nSize, u8* pOut)
+{
+	// What the music has queued first (a write just before this read is in
+	// the queue), under the render lock so the memory does not change halfway
+	m_Lock.Acquire();
+	m_pSynth->flushMIDIQueue();
+	m_pSynth->readMemory(nAddress, static_cast<MT32Emu::Bit32u>(nSize), pOut);
+	m_Lock.Release();
+}
+
+void CMT32Synth::SetGains(float nGain, float nReverbGain)
+{
+	m_nGain       = nGain;
+	m_nReverbGain = nReverbGain;
+	ApplyOutputGain();
+}
+
+bool CMT32Synth::SetResamplerQuality(TResamplerQuality Quality)
+{
+	if (Quality == TResamplerQuality::None && m_nSampleRate != MT32Emu::SAMPLE_RATE)
+		return false;
+	m_Lock.Acquire();
+	m_ResamplerQuality = Quality;
+	CreateConverter();
+	m_Lock.Release();
 	return true;
+}
+
+void CMT32Synth::SetReverbMode(u8 nMode)
+{
+	m_nReverbMode = nMode;
+	m_Lock.Acquire();
+	ApplyEngineSettings();
+	m_Lock.Release();
+}
+
+// Settings Munt forgets when it is opened again (a ROM set change)
+void CMT32Synth::ApplyEngineSettings()
+{
+	m_pSynth->setReversedStereoEnabled(m_bReversedStereo);
+	if (m_nReverbMode == 0)
+	{
+		// Back to the music's own reverb: enabling it reads the system area
+		m_pSynth->setReverbOverridden(false);
+		m_pSynth->setReverbEnabled(true);
+	}
+	else
+	{
+		m_pSynth->setReverbOverridden(false);
+		m_pSynth->setReverbEnabled(m_nReverbMode == 2);
+		m_pSynth->setReverbOverridden(true);
+	}
 }
 
 void CMT32Synth::HandleMIDIShortMessage(u32 nMessage)
@@ -332,6 +405,7 @@ bool CMT32Synth::SwitchROMSet(TMT32ROMSet ROMSet)
 	m_pSynth->close();
 	assert(m_pSynth->open(*pControlROMImage, *pPCMROMImage));
 	ApplyOutputGain();
+	ApplyEngineSettings();
 	ApplyKeptSettings();
 	m_Lock.Release();
 

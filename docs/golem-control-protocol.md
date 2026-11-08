@@ -185,12 +185,31 @@ and they have their own replies (`44 INFO`, `45 DATA`) and error codes
 (`07`-`0B`). The firmware implements `GET_INFO` (`07`), `PARAM_WRITE` (`08`),
 `PARAM_READ` (`09`) and `BLOB` (`0C`) for:
 
+- area `00`: the MT-32's memory with Roland's addresses (patch and rhythm
+  temporary, timbre temporary, patch memory, timbre memory, system; display
+  and reset can only be written). A write is a DT1 in order with the music; a
+  read sees every write before it. Works with another engine active, to
+  prepare sounds; without MT-32 ROMs, "unavailable" (`05`);
 - area `01`: OPL3 instruments, 128 bytes each, of the working bank;
 - area `02`: the OPL3 bank directory and header;
+- area `04`: the MT-32's ROM timbres, read-only: timbre *n* (0-191, A1-B64
+  then the rhythm timbres) at *n* x `02 00`, 256 bytes each;
 - area `10`: settings, section `00` (the `SET_PARAMETER` values at `00`-`06`,
-  read-only state at `20`-`26`) and section `03` (OPL3 emulator, chips, gain);
+  read-only state at `20`-`26`), section `01` (MT-32 gain and reverb gain
+  x100, resampler quality 0-4, reversed stereo, reverb 0 as the music says /
+  1 forced off / 2 forced on) and section `03` (OPL3 emulator, chips, gain);
 - `BLOB` type `01`: the working bank as a WOPL file (WOPLX when it carries the
-  Golem extras), read out or uploaded.
+  Golem extras), read out or uploaded;
+- `BLOB` type `04`: an MT-32 dump, DT1 messages one after another (`.SYX`):
+  read out, it holds the timbre memory, patch memory, rhythm setup and
+  system; uploaded, it is checked whole and then played to the MT-32.
+
+Native Roland RQ1 (`F0 41 10 16 11 ...`) from the GPIO serial port is
+answered while the MT-32 is the active engine, as an MT-32 does: DT1 messages
+of up to 256 bytes, at least 20 ms apart, with only the valid part of the
+request, cut at the end of its zone. Requests to another unit, relative to a
+channel, for the display or reset, or with `usb_out = bridge` get no answer.
+RQ1 from USB or the network is not answered yet.
 
 The OPL3 working bank is what the engine plays. Edits are heard at once,
 survive GM System On and the stop sweep, and last until another bank is

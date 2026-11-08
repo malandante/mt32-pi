@@ -3,10 +3,12 @@
 //
 // The firmware's side of the Golem sound-parameter protocol (golem-next
 // docs/sound-params.md), the same as golemd's (golem-linux
-// src/engine_params.cpp). Implemented: area 01 (OPL3 instruments), 02 (OPL3
-// bank directory and header), 10 sections 00 (general, with the
-// SET_PARAMETER settings) and 03 (OPL3 engine), and BLOB with WOPL/WOPLX
-// banks. Other areas and addresses answer "address" (08) until they exist.
+// src/engine_params.cpp). Implemented: area 00 (the MT-32's memory), 01
+// (OPL3 instruments), 02 (OPL3 bank directory and header), 04 (the MT-32's
+// ROM timbres), 10 sections 00 (general, with the SET_PARAMETER settings), 01
+// (MT-32 engine) and 03 (OPL3 engine), BLOB with WOPL/WOPLX banks and MT-32
+// dumps, and native RQ1. Other areas and addresses answer "address" (08)
+// until they exist.
 //
 // This file is part of mt32-pi.
 //
@@ -48,6 +50,17 @@ constexpr u32 GeneralSynth = 0x20, GeneralROM = 0x21, GeneralSFLow = 0x22, Gener
               GeneralUSBOut = 0x24, GeneralUSBCount = 0x25, GeneralEngines = 0x26;
 constexpr u32 OPL3Emulator = 0x00, OPL3Chips = 0x01, OPL3GainLow = 0x03, OPL3GainHigh = 0x04;
 constexpr unsigned OPL3GainMax = 1600; // x100: 16.0
+constexpr u32 MT32GainLow = 0x00, MT32GainHigh = 0x01, MT32ReverbGainLow = 0x02, MT32ReverbGainHigh = 0x03,
+              MT32Resampler = 0x04, MT32Reversed = 0x05, MT32Reverb = 0x06;
+constexpr unsigned MT32GainMax = 1600; // x100: 16.0
+
+// Native RQ1 answers: no more than a whole timbre memory waiting (64 DT1)
+// plus room for a second request
+constexpr size_t RQ1QueueMax = 160;
+constexpr unsigned RQ1GapMicros = 20000; // between DT1 messages, as the MT-32 asks
+constexpr unsigned MicrosPerByte = 320;  // 10 bits at 31250 baud
+
+unsigned Hundredths(float n) { return static_cast<unsigned>(n * 100.0f + 0.5f); }
 
 // A whole frame or nothing: a frame cut by a full transmit buffer would
 // corrupt the Next's MIDI stream. At 31250 baud the 2 KB buffer empties in
@@ -93,6 +106,8 @@ golem::ParamInfo CMT32Pi::Info()
 
 	Info.Engines   = (m_pMT32Synth ? 1 : 0) | (m_pSoundFontSynth ? 2 : 0) | (m_pOPL3Synth ? 4 : 0);
 	Info.Functions = golem::param::FnAreas;
+	if (m_pMT32Synth)
+		Info.Functions |= golem::param::FnMT32RQ1 | golem::param::FnROMTimbres;
 	if (m_pOPL3Synth)
 		Info.Functions |= golem::param::FnOPL3Instr | golem::param::FnWOPLUp | golem::param::FnWOPLDown;
 	if (m_pSoundFontSynth)
@@ -110,6 +125,12 @@ golem::ParamInfo CMT32Pi::Info()
 u8 CMT32Pi::AreaRead(u8 nArea, uint32_t nAddress, size_t nSize, std::vector<u8>& Out)
 {
 	Out.clear();
+	if (nArea == golem::param::MT32 || nArea == golem::param::MT32ROM)
+	{
+		if (!m_pMT32Synth)
+			return golem::param::Unavailable;
+		return golem::mt32mem::Read(*this, nArea, nAddress, nSize, Out);
+	}
 	if (nArea == golem::param::OPL3Instr || nArea == golem::param::OPL3Banks)
 		return ReadOPL3(nArea, nAddress, nSize, Out);
 	if (nArea != golem::param::Settings)
@@ -182,6 +203,9 @@ u8 CMT32Pi::ReadSetting(u32 nSection, u32 p, u8& v)
 		}
 	}
 
+	if (nSection == 1)
+		return ReadMT32Setting(p, v);
+
 	if (nSection == 3)
 	{
 		if (!m_pOPL3Synth)
@@ -202,6 +226,13 @@ u8 CMT32Pi::ReadSetting(u32 nSection, u32 p, u8& v)
 
 u8 CMT32Pi::AreaWrite(u8 nArea, uint32_t nAddress, const u8* pData, size_t nSize, size_t& nBad)
 {
+	if (nArea == golem::param::MT32)
+	{
+		nBad = 0;
+		if (!m_pMT32Synth)
+			return golem::param::Unavailable;
+		return golem::mt32mem::Write(*this, nAddress, pData, nSize, nBad);
+	}
 	if (nArea == golem::param::OPL3Instr || nArea == golem::param::OPL3Banks)
 		return WriteOPL3(nArea, nAddress, pData, nSize, nBad);
 	if (nArea == golem::param::Settings)
@@ -214,6 +245,8 @@ u8 CMT32Pi::AreaWrite(u8 nArea, uint32_t nAddress, const u8* pData, size_t nSize
 u8 CMT32Pi::WriteSettings(u32 nAddress, const u8* p, size_t n, size_t& nBad)
 {
 	const u32 nSection = Section(nAddress);
+	if (nSection == 1)
+		return WriteMT32Settings(nAddress, p, n, nBad);
 	for (size_t i = 0; i < n; ++i)
 	{
 		const u32 a  = nAddress + static_cast<u32>(i);
@@ -361,6 +394,17 @@ u8 CMT32Pi::WriteOPL3(u8 nArea, u32 nAddress, const u8* p, size_t n, size_t& nBa
 
 u8 CMT32Pi::BlobCommit(u8 nType, u8 nTarget, std::vector<u8>&& File)
 {
+	if (nType == golem::param::BlobMT32 && nTarget == 0)
+	{
+		if (!m_pMT32Synth)
+			return golem::param::Unavailable;
+		size_t nBad = 0;
+		const u8 nError = golem::mt32mem::LoadDump(*this, File.data(), File.size(), nBad);
+		if (nError != golem::param::OK)
+			LOGWARN("MT-32 dump refused at byte %u", static_cast<unsigned>(nBad));
+		return nError;
+	}
+
 	if (nType != golem::param::BlobWOPL || nTarget != 0 || !m_pOPL3Synth)
 		return golem::param::Unavailable;
 
@@ -378,6 +422,14 @@ u8 CMT32Pi::BlobCommit(u8 nType, u8 nTarget, std::vector<u8>&& File)
 
 u8 CMT32Pi::BlobGet(u8 nType, u8 nOrigin, std::vector<u8>& File)
 {
+	if (nType == golem::param::BlobMT32 && nOrigin == 0)
+	{
+		if (!m_pMT32Synth)
+			return golem::param::Unavailable;
+		File = golem::mt32mem::Dump(*this);
+		return golem::param::OK;
+	}
+
 	if (nType != golem::param::BlobWOPL || nOrigin != 0 || !m_pOPL3Synth)
 		return golem::param::Unavailable;
 	const golem::OPLBank* pBank = m_pOPL3Synth->GetWorkingBank();
@@ -385,4 +437,137 @@ u8 CMT32Pi::BlobGet(u8 nType, u8 nOrigin, std::vector<u8>& File)
 		return golem::param::Failed;
 	File = pBank->Save();
 	return File.empty() ? golem::param::Failed : golem::param::OK;
+}
+
+// Area 10, section 01: the MT-32 engine (sound-params.md 8.2)
+u8 CMT32Pi::ReadMT32Setting(u32 p, u8& v)
+{
+	if (!m_pMT32Synth)
+		return golem::param::Unavailable;
+	const unsigned nGain = Hundredths(m_pMT32Synth->GetGain()), nReverbGain = Hundredths(m_pMT32Synth->GetReverbGain());
+	switch (p)
+	{
+		case MT32GainLow:        v = nGain & 0x7F; return golem::param::OK;
+		case MT32GainHigh:       v = (nGain >> 7) & 0x7F; return golem::param::OK;
+		case MT32ReverbGainLow:  v = nReverbGain & 0x7F; return golem::param::OK;
+		case MT32ReverbGainHigh: v = (nReverbGain >> 7) & 0x7F; return golem::param::OK;
+		case MT32Resampler:      v = static_cast<u8>(m_pMT32Synth->GetResamplerQuality()); return golem::param::OK;
+		case MT32Reversed:       v = m_pMT32Synth->GetReversedStereo() ? 1 : 0; return golem::param::OK;
+		case MT32Reverb:         v = m_pMT32Synth->GetReverbMode(); return golem::param::OK;
+		default:                 return golem::param::BadAddress;
+	}
+}
+
+// Checked whole first, then applied, so a refused byte changes nothing
+u8 CMT32Pi::WriteMT32Settings(u32 nAddress, const u8* p, size_t n, size_t& nBad)
+{
+	if (!m_pMT32Synth)
+	{
+		nBad = 0;
+		return golem::param::Unavailable;
+	}
+
+	unsigned nGain = Hundredths(m_pMT32Synth->GetGain()), nReverbGain = Hundredths(m_pMT32Synth->GetReverbGain());
+	bool bGains = false;
+	for (size_t i = 0; i < n; ++i)
+	{
+		const u32 a  = nAddress + static_cast<u32>(i);
+		const u32 pp = a & 0x7F;
+		nBad = i;
+		if (Section(a) != 1 || ((a >> 7) & 0x7F) != 0 || pp > MT32Reverb)
+			return golem::param::BadAddress;
+		switch (pp)
+		{
+			case MT32GainLow:        nGain = (nGain & ~0x7Fu) | p[i]; bGains = true; break;
+			case MT32GainHigh:       nGain = (nGain & 0x7Fu) | (p[i] << 7); bGains = true; break;
+			case MT32ReverbGainLow:  nReverbGain = (nReverbGain & ~0x7Fu) | p[i]; bGains = true; break;
+			case MT32ReverbGainHigh: nReverbGain = (nReverbGain & 0x7Fu) | (p[i] << 7); bGains = true; break;
+			case MT32Resampler:
+				// None renders at Munt's own 32 kHz: only right with that output rate
+				if (p[i] > 4 || (p[i] == 0 && m_pConfig->AudioSampleRate != 32000))
+					return golem::param::BadValue;
+				break;
+			case MT32Reversed: if (p[i] > 1) return golem::param::BadValue; break;
+			case MT32Reverb:   if (p[i] > 2) return golem::param::BadValue; break;
+		}
+	}
+	if (bGains && (nGain > MT32GainMax || nReverbGain > MT32GainMax))
+	{
+		nBad = 0;
+		return golem::param::BadValue;
+	}
+	nBad = 0;
+
+	for (size_t i = 0; i < n; ++i)
+	{
+		switch ((nAddress + static_cast<u32>(i)) & 0x7F)
+		{
+			case MT32Resampler:
+				m_pMT32Synth->SetResamplerQuality(static_cast<CMT32Synth::TResamplerQuality>(p[i]));
+				break;
+			case MT32Reversed: m_pMT32Synth->SetReversedStereo(p[i] != 0); break;
+			case MT32Reverb:   m_pMT32Synth->SetReverbMode(p[i]); break;
+			default:           break;
+		}
+	}
+	if (bGains)
+		m_pMT32Synth->SetGains(nGain / 100.0f, nReverbGain / 100.0f);
+	return golem::param::OK;
+}
+
+void CMT32Pi::ReadMunt(uint32_t nAddress, size_t nSize, uint8_t* pOut)
+{
+	m_pMT32Synth->ReadMemory(nAddress, nSize, pOut);
+}
+
+void CMT32Pi::SendDT1(const uint8_t* pMessage, size_t nSize)
+{
+	// As a song's DT1: the kept channel assignment and volume still apply
+	m_pMT32Synth->HandleMIDISysExMessage(pMessage, nSize);
+}
+
+// A native RQ1 from the Next while the MT-32 plays: the DT1 answers wait in a
+// queue for SendRQ1Replies. Other units, channel-relative requests and
+// unreadable zones get no answer, as on an MT-32.
+bool CMT32Pi::AnswerMT32Request(const u8* pData, size_t nSize)
+{
+	uint32_t nAddress, nLength;
+	if (!m_pMT32Synth || m_pCurrentSynth != m_pMT32Synth || !golem::mt32mem::IsRQ1(pData, nSize, nAddress, nLength))
+		return false;
+
+	auto Replies = golem::mt32mem::AnswerRQ1(*this, nAddress, nLength);
+	for (auto& Reply : Replies)
+	{
+		if (m_RQ1Replies.size() >= RQ1QueueMax)
+		{
+			LOGWARN("RQ1 answers dropped: too many requests at once");
+			break;
+		}
+		m_RQ1Replies.push_back(std::move(Reply));
+	}
+	return true;
+}
+
+// One whole DT1 at a time, when the serial port has room for all of it, and
+// 20 ms after the previous one has left
+void CMT32Pi::SendRQ1Replies()
+{
+	if (m_RQ1Replies.empty())
+		return;
+	if (!m_bSerialMIDIEnabled || m_pSerial == nullptr)
+	{
+		m_RQ1Replies.clear();
+		return;
+	}
+
+	const unsigned nNow = CTimer::GetClockTicks();
+	if (static_cast<int>(nNow - m_nRQ1NextTime) < 0)
+		return;
+	const std::vector<u8>& Reply = m_RQ1Replies.front();
+	if (m_pSerial->GetFreeWriteSpace() < Reply.size())
+		return;
+
+	m_pSerial->Write(Reply.data(), Reply.size());
+	m_nRQ1NextTime = nNow + static_cast<unsigned>(Reply.size()) * MicrosPerByte + RQ1GapMicros;
+	m_RQ1Replies.pop_front();
 }

@@ -87,6 +87,12 @@ jobs:
             build-adlmidi-host/libADLMIDI.a -o test_golemparams
           ./test_golemparams
 
+      - name: Sound-parameter protocol (MT-32 memory, RQ1, dumps)
+        run: |
+          g++ -std=c++14 -Wall -Wextra -Werror -Iinclude tests/test_mt32mem.cpp src/golem/mt32mem.cpp src/golem/params.cpp \
+            -o test_mt32mem
+          ./test_mt32mem
+
   build:
     runs-on: ubuntu-latest
     name: build-${{ matrix.board }}
