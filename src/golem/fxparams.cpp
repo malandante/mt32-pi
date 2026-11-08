@@ -8,7 +8,7 @@
 #include "golem/fxparams.h"
 
 #include <cctype>
-#include <cmath>
+#include <math.h> // roundf, powf: newlib's <cmath> has no std::round
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -95,7 +95,7 @@ bool ParseFloat(const char* p, float& f)
 {
 	char* pEnd = nullptr;
 	f = strtof(p, &pEnd);
-	return pEnd != p && *pEnd == '\0' && std::isfinite(f);
+	return pEnd != p && *pEnd == '\0' && __builtin_isfinite(f);
 }
 
 // A float in range, in the protocol's units
@@ -104,7 +104,7 @@ bool ParseUnits(const char* p, float nScale, unsigned nMin, unsigned nMax, uint1
 	float f;
 	if (!ParseFloat(p, f))
 		return false;
-	const float u = std::round(f * nScale);
+	const float u = roundf(f * nScale);
 	if (u < static_cast<float>(nMin) || u > static_cast<float>(nMax))
 		return false;
 	v = static_cast<uint16_t>(u);
@@ -126,8 +126,8 @@ void PutValue(std::string& Out, const char* pKey, unsigned nUnits, float nScale)
 {
 	char Buffer[48];
 	int nDecimals = 0;
-	while (nDecimals < 4 && std::round(std::round(nUnits / nScale * std::pow(10.0f, nDecimals)) /
-	                                   std::pow(10.0f, nDecimals) * nScale) != nUnits)
+	while (nDecimals < 4 && roundf(roundf(nUnits / nScale * powf(10.0f, nDecimals)) /
+	                                   powf(10.0f, nDecimals) * nScale) != nUnits)
 		++nDecimals;
 	snprintf(Buffer, sizeof(Buffer), "%s = %.*f\n", pKey, nDecimals, nUnits / nScale);
 	Out += Buffer;
@@ -136,7 +136,7 @@ void PutValue(std::string& Out, const char* pKey, unsigned nUnits, float nScale)
 
 uint16_t Units(float nValue, float nScale, unsigned nMin, unsigned nMax)
 {
-	const float u = std::round(nValue * nScale);
+	const float u = roundf(nValue * nScale);
 	if (!(u >= static_cast<float>(nMin)))
 		return static_cast<uint16_t>(nMin);
 	if (u > static_cast<float>(nMax))
