@@ -197,9 +197,16 @@ and they have their own replies (`44 INFO`, `45 DATA`) and error codes
 - area `10`: settings, section `00` (the `SET_PARAMETER` values at `00`-`06`,
   read-only state at `20`-`26`), section `01` (MT-32 gain and reverb gain
   x100, resampler quality 0-4, reversed stereo, reverb 0 as the music says /
-  1 forced off / 2 forced on) and section `03` (OPL3 emulator, chips, gain);
+  1 forced off / 2 forced on), section `02` (FluidSynth: reverb on/off, room
+  size, damping, width, level; chorus on/off, voices, level, speed, depth,
+  type; polyphony; gain) and section `03` (OPL3 emulator, chips, gain);
 - `BLOB` type `01`: the working bank as a WOPL file (WOPLX when it carries the
   Golem extras), read out or uploaded;
+- `BLOB` type `03`: FluidSynth's effects as a profile (`.cfg`, the format of
+  the SoundFont profiles plus `chorus_type` and `polyphony`): read out, what
+  plays; uploaded, what plays from then on, until another SoundFont is chosen.
+  `fx` (`SET_PARAMETER` 1) stays the general switch: off, no reverb and no
+  chorus whatever the effects say;
 - `BLOB` type `04`: an MT-32 dump, DT1 messages one after another (`.SYX`):
   read out, it holds the timbre memory, patch memory, rhythm setup and
   system; uploaded, it is checked whole and then played to the MT-32.

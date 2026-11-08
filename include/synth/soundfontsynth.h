@@ -27,6 +27,7 @@
 
 #include <fluidsynth.h>
 
+#include "golem/fxparams.h"
 #include "soundfontmanager.h"
 #include "synth/fxprofile.h"
 #include "synth/synthbase.h"
@@ -57,10 +58,18 @@ public:
 	void SetEffects(bool bEnabled);
 	bool GetEffects() const { return m_bEffects; }
 	bool HasEffectsSet() const { return m_bEffectsSet; }
+
+	// The effects that play (Golem sound parameters, area 10 section 02 and
+	// BLOB type 03): from the SoundFont's profile and mt32-pi.cfg when the
+	// SoundFont loads, then as written. fx (SetEffects) still switches the
+	// reverb and the chorus off over them.
+	golem::FXSettings GetFX() const { return m_FX; }
+	void SetFX(const golem::FXSettings& FX);
 	CSoundFontManager& GetSoundFontManager() { return m_SoundFontManager; }
 
 private:
 	bool Reinitialize(const char* pSoundFontPath, const TFXProfile* pFXProfile);
+	void ApplyFX(); // with the lock held
 	void ResetMIDIMonitor();
 #ifndef NDEBUG
 	void DumpFXSettings() const;
@@ -76,6 +85,7 @@ private:
 	float m_nInitialGain;
 	bool m_bEffects;
 	bool m_bEffectsSet;
+	golem::FXSettings m_FX;
 
 	u16 m_nPercussionMask;
 	size_t m_nCurrentSoundFontIndex;

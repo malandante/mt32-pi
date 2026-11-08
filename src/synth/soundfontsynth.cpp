@@ -307,14 +307,48 @@ void CSoundFontSynth::SetMasterVolume(u8 nVolume)
 	m_Lock.Release();
 }
 
+// fx off silences the reverb and the chorus; on, they are as the effects say
 void CSoundFontSynth::SetEffects(bool bEnabled)
 {
 	m_bEffects    = bEnabled;
 	m_bEffectsSet = true;
 	m_Lock.Acquire();
-	fluid_synth_reverb_on(m_pSynth, -1, bEnabled);
-	fluid_synth_chorus_on(m_pSynth, -1, bEnabled);
+	ApplyFX();
 	m_Lock.Release();
+}
+
+void CSoundFontSynth::SetFX(const golem::FXSettings& FX)
+{
+	m_FX = FX;
+	if (!m_bEffectsSet)
+		m_bEffects = m_FX.Reverb || m_FX.Chorus;
+	m_Lock.Acquire();
+	ApplyFX();
+	m_Lock.Release();
+}
+
+void CSoundFontSynth::ApplyFX()
+{
+	if (!m_pSynth)
+		return;
+	const bool bAllowed = !m_bEffectsSet || m_bEffects;
+
+	fluid_synth_set_polyphony(m_pSynth, m_FX.Polyphony);
+	m_nInitialGain = m_FX.GainF();
+	fluid_synth_set_gain(m_pSynth, m_nVolume / 100.0f * m_nInitialGain);
+
+	fluid_synth_reverb_on(m_pSynth, -1, bAllowed && m_FX.Reverb);
+	fluid_synth_set_reverb_group_damp(m_pSynth, -1, m_FX.DampingF());
+	fluid_synth_set_reverb_group_level(m_pSynth, -1, m_FX.LevelF());
+	fluid_synth_set_reverb_group_roomsize(m_pSynth, -1, m_FX.RoomSizeF());
+	fluid_synth_set_reverb_group_width(m_pSynth, -1, m_FX.WidthF());
+
+	fluid_synth_chorus_on(m_pSynth, -1, bAllowed && m_FX.Chorus);
+	fluid_synth_set_chorus_group_depth(m_pSynth, -1, m_FX.DepthF());
+	fluid_synth_set_chorus_group_level(m_pSynth, -1, m_FX.ChorusLevelF());
+	fluid_synth_set_chorus_group_nr(m_pSynth, -1, m_FX.Voices);
+	fluid_synth_set_chorus_group_speed(m_pSynth, -1, m_FX.SpeedF());
+	fluid_synth_set_chorus_group_type(m_pSynth, -1, m_FX.ChorusType ? FLUID_CHORUS_MOD_TRIANGLE : FLUID_CHORUS_MOD_SINE);
 }
 
 size_t CSoundFontSynth::Render(float* pOutBuffer, size_t nFrames)
@@ -407,32 +441,25 @@ bool CSoundFontSynth::Reinitialize(const char* pSoundFontPath, const TFXProfile*
 		return false;
 	}
 
-	fluid_synth_set_polyphony(m_pSynth, pConfig->FluidSynthPolyphony);
-
-	m_nInitialGain = pFXProfile->nGain.ValueOr(pConfig->FluidSynthDefaultGain);
-	fluid_synth_set_gain(m_pSynth, m_nVolume / 100.0f * m_nInitialGain);
-
-	// Use values from effects profile if set, otherwise use defaults
-	fluid_synth_reverb_on(m_pSynth, -1, pFXProfile->bReverbActive.ValueOr(pConfig->FluidSynthDefaultReverbActive));
-	fluid_synth_set_reverb_group_damp(m_pSynth, -1, pFXProfile->nReverbDamping.ValueOr(pConfig->FluidSynthDefaultReverbDamping));
-	fluid_synth_set_reverb_group_level(m_pSynth, -1, pFXProfile->nReverbLevel.ValueOr(pConfig->FluidSynthDefaultReverbLevel));
-	fluid_synth_set_reverb_group_roomsize(m_pSynth, -1, pFXProfile->nReverbRoomSize.ValueOr(pConfig->FluidSynthDefaultReverbRoomSize));
-	fluid_synth_set_reverb_group_width(m_pSynth, -1, pFXProfile->nReverbWidth.ValueOr(pConfig->FluidSynthDefaultReverbWidth));
-
-	fluid_synth_chorus_on(m_pSynth, -1, pFXProfile->bChorusActive.ValueOr(pConfig->FluidSynthDefaultChorusActive));
-	fluid_synth_set_chorus_group_depth(m_pSynth, -1, pFXProfile->nChorusDepth.ValueOr(pConfig->FluidSynthDefaultChorusDepth));
-	fluid_synth_set_chorus_group_level(m_pSynth, -1, pFXProfile->nChorusLevel.ValueOr(pConfig->FluidSynthDefaultChorusLevel));
-	fluid_synth_set_chorus_group_nr(m_pSynth, -1, pFXProfile->nChorusVoices.ValueOr(pConfig->FluidSynthDefaultChorusVoices));
-	fluid_synth_set_chorus_group_speed(m_pSynth, -1, pFXProfile->nChorusSpeed.ValueOr(pConfig->FluidSynthDefaultChorusSpeed));
-
-	if (m_bEffectsSet)
-	{
-		fluid_synth_reverb_on(m_pSynth, -1, m_bEffects);
-		fluid_synth_chorus_on(m_pSynth, -1, m_bEffects);
-	}
-	else
-		m_bEffects = pFXProfile->bReverbActive.ValueOr(pConfig->FluidSynthDefaultReverbActive) ||
-		             pFXProfile->bChorusActive.ValueOr(pConfig->FluidSynthDefaultChorusActive);
+	// Use values from effects profile if set, otherwise use defaults; kept in
+	// the Golem protocol's units, so what a client writes reads back the same
+	using golem::fxparams::Units;
+	m_FX.Polyphony   = Units(pFXProfile->nPolyphony.ValueOr(pConfig->FluidSynthPolyphony), 1.0f, 1, 16383);
+	m_FX.Gain        = Units(pFXProfile->nGain.ValueOr(pConfig->FluidSynthDefaultGain), 1000.0f, 0, 10000);
+	m_FX.Reverb      = pFXProfile->bReverbActive.ValueOr(pConfig->FluidSynthDefaultReverbActive);
+	m_FX.Damping     = Units(pFXProfile->nReverbDamping.ValueOr(pConfig->FluidSynthDefaultReverbDamping), 1000.0f, 0, 1000);
+	m_FX.Level       = Units(pFXProfile->nReverbLevel.ValueOr(pConfig->FluidSynthDefaultReverbLevel), 1000.0f, 0, 1000);
+	m_FX.RoomSize    = Units(pFXProfile->nReverbRoomSize.ValueOr(pConfig->FluidSynthDefaultReverbRoomSize), 1000.0f, 0, 1000);
+	m_FX.Width       = Units(pFXProfile->nReverbWidth.ValueOr(pConfig->FluidSynthDefaultReverbWidth), 100.0f, 0, 10000);
+	m_FX.Chorus      = pFXProfile->bChorusActive.ValueOr(pConfig->FluidSynthDefaultChorusActive);
+	m_FX.Depth       = Units(pFXProfile->nChorusDepth.ValueOr(pConfig->FluidSynthDefaultChorusDepth), 10.0f, 0, 2560);
+	m_FX.ChorusLevel = Units(pFXProfile->nChorusLevel.ValueOr(pConfig->FluidSynthDefaultChorusLevel), 1000.0f, 0, 10000);
+	m_FX.Voices      = static_cast<u8>(Units(pFXProfile->nChorusVoices.ValueOr(pConfig->FluidSynthDefaultChorusVoices), 1.0f, 0, 99));
+	m_FX.Speed       = Units(pFXProfile->nChorusSpeed.ValueOr(pConfig->FluidSynthDefaultChorusSpeed), 1000.0f, 100, 5000);
+	m_FX.ChorusType  = static_cast<u8>(pFXProfile->nChorusType.ValueOr(0) ? 1 : 0);
+	if (!m_bEffectsSet)
+		m_bEffects = m_FX.Reverb || m_FX.Chorus;
+	ApplyFX();
 
 #ifndef NDEBUG
 	DumpFXSettings();

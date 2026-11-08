@@ -24,6 +24,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stereo and a forced reverb on or off) and `BLOB` type 04 (an MT-32 dump of
   DT1 messages, read out or uploaded). Native RQ1 from the Next is answered
   with DT1, as an MT-32 does; Munt does not answer it.
+- Sound-parameter protocol, FluidSynth part: area 10 section 02 (reverb,
+  chorus with its type, polyphony and gain of what plays) and `BLOB` type 03
+  (the effects as a `.cfg` profile, read out or uploaded). SoundFont profiles
+  also take `chorus_type` (sine, triangle) and `polyphony`.
+
+### Changed
+
+- `fx` on (`SET_PARAMETER` 1) no longer forces the reverb and the chorus on:
+  they are as the SoundFont's profile (or what was written) says. Off still
+  silences both.
 
 ## [golem-1.2.0] - 2026-10-21
 

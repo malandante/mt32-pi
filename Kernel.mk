@@ -5,6 +5,7 @@
 include Config.mk
 
 OBJS		:=	src/config.o \
+			src/golem/fxparams.o \
 			src/golem/mt32mem.o \
 			src/golem/oplbank.o \
 			src/golem/opl3work.o \
