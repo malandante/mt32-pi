@@ -18,6 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   settings and adds the OPL3 emulator, chips and gain.
 - The OPL3 working bank: edits and an uploaded bank survive GM System On (sent
   before each song) and the stop sweep, until another bank is chosen.
+- Sound-parameter protocol, MT-32 part: area 00 (the MT-32's memory with
+  Roland's addresses, read and written), area 04 (the ROM timbres, read-only),
+  area 10 section 01 (MT-32 gain, reverb gain, resampler quality, reversed
+  stereo and a forced reverb on or off) and `BLOB` type 04 (an MT-32 dump of
+  DT1 messages, read out or uploaded). Native RQ1 from the Next is answered
+  with DT1, as an MT-32 does; Munt does not answer it.
 
 ## [golem-1.2.0] - 2026-10-21
 

@@ -203,7 +203,8 @@ CMT32Pi::CMT32Pi(CI2CMaster* pI2CMaster, CSPIMaster* pSPIMaster, CInterruptSyste
 	  m_USBOutMode(CConfig::TMIDIUSBOut::Off),
 	  m_nKeysToNextDropped(0),
 	  m_nUSBTxDroppedReported(0),
-	  m_ParamProtocol(*this, [this](const uint8_t* pData, size_t nSize) { SendGolemFrame(pData, nSize); })
+	  m_ParamProtocol(*this, [this](const uint8_t* pData, size_t nSize) { SendGolemFrame(pData, nSize); }),
+	  m_nRQ1NextTime(0)
 {
 	s_pThis = this;
 }
@@ -565,6 +566,9 @@ void CMT32Pi::MainTask()
 		// Send forwarded MIDI to USB devices
 		FlushUSBMIDI();
 
+		// Answers to native MT-32 RQ1, spaced out
+		SendRQ1Replies();
+
 		// Process network packets
 		UpdateNetwork();
 
@@ -852,7 +856,10 @@ void CMT32Pi::OnSysExMessage(const u8* pData, size_t nSize)
 			QueueUSBSysEx(pData, nSize);
 
 		if (m_USBOutMode != CConfig::TMIDIUSBOut::Bridge)
+		{
 			m_pCurrentSynth->HandleMIDISysExMessage(pData, nSize);
+			AnswerMT32Request(pData, nSize);
+		}
 	}
 
 	// Wake from power saving mode if necessary

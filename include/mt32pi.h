@@ -43,6 +43,7 @@
 #include <circle/usb/usbmassdevice.h>
 #include <circle/usb/usbmidi.h>
 #include <circle/usb/usbserial.h>
+#include <deque>
 #include <fatfs/ff.h>
 #include <wlan/bcm4343.h>
 #include <wlan/hostap/wpa_supplicant/wpasupplicant.h>
@@ -52,6 +53,7 @@
 #include "control/control.h"
 #include "control/mister.h"
 #include "event.h"
+#include "golem/mt32mem.h"
 #include "golem/params.h"
 #include "lcd/ui.h"
 #include "loudness.h"
@@ -72,7 +74,8 @@
 
 //#define MONITOR_TEMPERATURE
 
-class CMT32Pi : CMultiCoreSupport, CPower, CMIDIParser, CAppleMIDIHandler, CUDPMIDIHandler, golem::ParamHost
+class CMT32Pi : CMultiCoreSupport, CPower, CMIDIParser, CAppleMIDIHandler, CUDPMIDIHandler, golem::ParamHost,
+                golem::MT32Access
 {
 public:
 	CMT32Pi(CI2CMaster* pI2CMaster, CSPIMaster* pSPIMaster, CInterruptSystem* pInterrupt, CGPIOManager* pGPIOManager, CMIDISerialDevice* pSerialDevice, CUSBHCIDevice* pUSBHCI);
@@ -188,6 +191,14 @@ private:
 	u8 WriteSettings(u32 nAddress, const u8* pData, size_t nSize, size_t& nBad);
 	u8 ReadOPL3(u8 nArea, u32 nAddress, size_t nSize, std::vector<u8>& Out);
 	u8 WriteOPL3(u8 nArea, u32 nAddress, const u8* pData, size_t nSize, size_t& nBad);
+	u8 ReadMT32Setting(u32 nParameter, u8& nValue);
+	u8 WriteMT32Settings(u32 nAddress, const u8* pData, size_t nSize, size_t& nBad);
+
+	// The MT-32's memory (golem/mt32mem.h): area 00 and 04, native RQ1, dumps
+	virtual void ReadMunt(uint32_t nAddress, size_t nSize, uint8_t* pOut) override;
+	virtual void SendDT1(const uint8_t* pMessage, size_t nSize) override;
+	bool AnswerMT32Request(const u8* pData, size_t nSize);
+	void SendRQ1Replies();
 
 	void ProcessEventQueue();
 	void ProcessButtonEvent(const TButtonEvent& Event);
@@ -299,6 +310,11 @@ private:
 
 	// Sound-parameter protocol: answers to the GPIO serial port
 	golem::ParamProtocol m_ParamProtocol;
+
+	// DT1 replies to native RQ1, sent one at a time from the main task, at
+	// least 20 ms apart as the MT-32 asks for long DT1 messages
+	std::deque<std::vector<u8>> m_RQ1Replies;
+	unsigned m_nRQ1NextTime;
 
 	static void EventHandler(const TEvent& Event);
 	static void USBMIDIDeviceRemovedHandler(CDevice* pDevice, void* pContext);

@@ -69,7 +69,8 @@ public:
 	// not undo a setting made from the config file or the Golem protocol.
 	void SetMIDIChannels(TMIDIChannels Channels);
 	TMIDIChannels GetMIDIChannels() const { return m_MIDIChannels; }
-	void SetReversedStereo(bool bEnabled) { m_pSynth->setReversedStereoEnabled(bEnabled); }
+	void SetReversedStereo(bool bEnabled);
+	bool GetReversedStereo() const { return m_bReversedStereo; }
 	bool SwitchROMSet(TMT32ROMSet ROMSet);
 	bool NextROMSet();
 	TMT32ROMSet GetROMSet() const;
@@ -77,6 +78,18 @@ public:
 	CROMManager& GetROMManager() { return m_ROMManager; }
 
 	u8 GetMasterVolume() const;
+
+	// Golem sound parameters: Munt's memory (golem/mt32mem.h), read after
+	// whatever is queued, and the engine settings of area 10, section 01
+	void ReadMemory(u32 nAddress, size_t nSize, u8* pOut);
+	float GetGain() const { return m_nGain; }
+	float GetReverbGain() const { return m_nReverbGain; }
+	void SetGains(float nGain, float nReverbGain);
+	TResamplerQuality GetResamplerQuality() const { return m_ResamplerQuality; }
+	bool SetResamplerQuality(TResamplerQuality Quality); // false: None needs a 32 kHz output
+	// Reverb: 0 as the music says, 1 forced off, 2 forced on
+	void SetReverbMode(u8 nMode);
+	u8 GetReverbMode() const { return m_nReverbMode; }
 
 private:
 	static constexpr size_t MT32ChannelCount = 9;
@@ -91,6 +104,8 @@ private:
 	static bool IsResetSysEx(const u8* pData, size_t nSize);
 	static bool WritesMIDIChannels(const u8* pData, size_t nSize);
 	void ApplyOutputGain();
+	void ApplyEngineSettings();
+	void CreateConverter();
 
 	// MT32Emu::ReportHandler
 	virtual bool onMIDIQueueOverflow() override;
@@ -109,6 +124,8 @@ private:
 	TResamplerQuality m_ResamplerQuality;
 	TMIDIChannels m_MIDIChannels;
 	u8 m_nMasterVolume;
+	bool m_bReversedStereo;
+	u8 m_nReverbMode;
 	MT32Emu::SampleRateConverter* m_pSampleRateConverter;
 
 	CROMManager m_ROMManager;

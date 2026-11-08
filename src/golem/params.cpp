@@ -202,7 +202,7 @@ void ParamProtocol::HandleBlob(uint8_t tt, uint8_t nFlags, const uint8_t* p, siz
 				return;
 			}
 			const size_t nTotal = wire::Get21(p + 2);
-			if (p[0] != param::BlobWOPL)
+			if (p[0] != param::BlobWOPL && p[0] != param::BlobMT32)
 			{
 				Fail(tt, param::Blob, param::Unavailable, 1);
 				return;

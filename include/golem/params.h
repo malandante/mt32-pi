@@ -7,7 +7,8 @@
 // golem-next docs/sound-params.md. Same frame and version as the control
 // protocol v1; every new command starts with a flags byte
 // and ends with a Roland checksum. Implemented here: GET_INFO (07),
-// PARAM_WRITE (08), PARAM_READ (09) and BLOB (0C) for WOPL/WOPLX banks.
+// PARAM_WRITE (08), PARAM_READ (09) and BLOB (0C) for WOPL/WOPLX banks and
+// MT-32 dumps.
 // OPL3_REG, OPL3_SESSION and SLOT answer "unknown command" for now.
 //
 
@@ -74,6 +75,7 @@ enum Area : uint8_t
 enum BlobType : uint8_t
 {
 	BlobWOPL = 0x01,
+	BlobMT32 = 0x04, // MT-32 dump: DT1 messages (.SYX)
 };
 
 // GET_INFO bits 7-8 (sound-params.md 4.1)
