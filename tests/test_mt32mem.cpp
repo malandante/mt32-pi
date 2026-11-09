@@ -381,6 +381,8 @@ static void TestProtocol()
 	CHECK(r.size() == 1 && r[0][7] == param::Error && r[0][9] == param::BadAddress);
 	r = Send(Request(0x04, param::Read, {param::MT32, 0x20, 0x00, 0x00, 1, 0}));
 	CHECK(r.size() == 1 && r[0][7] == param::Error && r[0][9] == param::BadAddress);
+	// A read has no position to report: detail 3FFF ("at 127" on the Next before)
+	CHECK(r.size() == 1 && r[0][10] == 0x7F && r[0][11] == 0x7F);
 
 	// The dump down (size, then chunks) and back up into a new model
 	r = Send(Request(0x05, param::Blob, {0x04, param::BlobMT32, 0, 0, 0, 0, 0, 0}));

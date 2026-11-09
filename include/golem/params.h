@@ -141,7 +141,7 @@ public:
 private:
 	void Reply(uint8_t nTransaction, uint8_t nResponse, uint8_t nCommand, const std::vector<uint8_t>& payload,
 	           bool bChecksum);
-	void Fail(uint8_t nTransaction, uint8_t nCommand, uint8_t nError, size_t nDetail = 0x7F);
+	void Fail(uint8_t nTransaction, uint8_t nCommand, uint8_t nError, size_t nDetail = 0x3FFF); // 3FFF: no detail
 
 	void HandleInfo(uint8_t tt, const uint8_t* p, size_t n);
 	void HandleWrite(uint8_t tt, uint8_t nFlags, const uint8_t* p, size_t n);
