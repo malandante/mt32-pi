@@ -340,4 +340,4 @@ jobs:
       if: steps.get_version.outputs.tag != ''
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: gh release create "${{ steps.get_version.outputs.tag }}" mt32-pi-*.zip --target "$GITHUB_SHA" --title "mt32-pi Golem fork ${{ steps.get_version.outputs.tag }}" --notes-file notes.md
+      run: gh release create "${{ steps.get_version.outputs.tag }}" mt32-pi-*.zip --target "$GITHUB_SHA" --title "Golem firmware ${{ steps.get_version.outputs.tag }}" --notes-file notes.md
