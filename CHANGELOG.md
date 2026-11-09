@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [golem-1.3.0] - 2026-11-09
+
+For golem-next 1.3.0 (`.gparam`). Checked on a Next with a Raspberry Pi 4,
+except native RQ1 (no Next program sends it yet: host tests only).
+
 ### Added
 
 - Sound-parameter protocol (golem-next `docs/sound-params.md`), OPL3 part,
