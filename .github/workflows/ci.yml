@@ -15,6 +15,9 @@ permissions:
 env:
   toolchain-version: 11.3.rel1
   python-version: 3.11
+  # CMake 4 (in the runner images by November 2026) refuses the old
+  # cmake_minimum_required of Munt and other submodules
+  CMAKE_POLICY_VERSION_MINIMUM: "3.5"
 
 jobs:
   lint:

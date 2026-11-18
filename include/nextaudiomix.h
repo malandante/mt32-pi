@@ -124,7 +124,12 @@ namespace NextAudio
 		// stereo floats, and clips to -1..1. Waits until half the ring has
 		// filled before it starts (and after running dry), so small rate
 		// differences between the two clocks do not empty it at once.
-		void MixInto(float* pOut, size_t nFrames, float nGain)
+		//
+		// nStep is the input rate over the output rate: the I2S link can run
+		// slower than the output (at 48 kHz the Next's data comes back too
+		// late for the Pi to read it), and the frames in between are linear
+		// interpolations. 1.0 passes them through.
+		void MixInto(float* pOut, size_t nFrames, float nGain, float nStep = 1.0f)
 		{
 			const size_t nWrite = __atomic_load_n(&m_nWrite, __ATOMIC_ACQUIRE);
 			size_t nRead = __atomic_load_n(&m_nRead, __ATOMIC_RELAXED);
@@ -137,12 +142,21 @@ namespace NextAudio
 				float L = 0.0f, R = 0.0f;
 				if (!m_bWaiting)
 				{
-					if (nRead != nWrite)
+					// Two frames to interpolate between, or one when the
+					// position is right on it (always, with nStep = 1)
+					const size_t nHave = nWrite - nRead;
+					if (nHave >= 2 || (nHave == 1 && m_nFrac == 0.0f))
 					{
-						const size_t n = nRead & (NFrames - 1);
-						L = m_Samples[n][0] * nGain;
-						R = m_Samples[n][1] * nGain;
-						++nRead;
+						const size_t a = nRead & (NFrames - 1);
+						const size_t b = nHave >= 2 ? (nRead + 1) & (NFrames - 1) : a;
+						L = (m_Samples[a][0] + (m_Samples[b][0] - m_Samples[a][0]) * m_nFrac) * nGain;
+						R = (m_Samples[a][1] + (m_Samples[b][1] - m_Samples[a][1]) * m_nFrac) * nGain;
+						m_nFrac += nStep;
+						while (m_nFrac >= 1.0f)
+						{
+							m_nFrac -= 1.0f;
+							++nRead;
+						}
 					}
 					else
 					{
@@ -174,6 +188,7 @@ namespace NextAudio
 		TDCBlocker m_DC[2];
 		size_t m_nWrite = 0;
 		size_t m_nRead  = 0;
+		float m_nFrac   = 0.0f;	// position between frame m_nRead and the next
 		static constexpr uint32_t LowBitsMask = (1u << 8) - 1;
 
 		volatile size_t m_nOverruns  = 0;

@@ -68,6 +68,7 @@ CFG(chunk_size,			int,				AudioChunkSize,				256						)
 CFG(reversed_stereo,		bool,				AudioReversedStereo,			false						)
 CFG(next_input,			bool,				AudioNextInput,				false						)
 CFG(next_input_gain,		float,				AudioNextInputGain,			1.0f						)
+CFG(next_input_rate,		int,				AudioNextInputRate,			32000						)
 END_SECTION
 
 BEGIN_SECTION(control)

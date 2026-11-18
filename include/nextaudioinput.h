@@ -37,13 +37,14 @@
 class CNextAudioInput : public CI2SSoundBaseDevice
 {
 public:
-	// About 21 ms at 48 kHz; playback starts at half (about 11 ms of delay)
+	// About 32 ms at 32 kHz; playback starts at half (about 16 ms of delay)
 	static constexpr size_t RingFrames = 1024;
 
 	CNextAudioInput(CInterruptSystem* pInterrupt, unsigned nSampleRate, unsigned nChunkSize);
 
-	// Audio task: adds the Next's audio to the synth's output
-	void MixInto(float* pOut, size_t nFrames, float nGain) { m_Ring.MixInto(pOut, nFrames, nGain); }
+	// Audio task: adds the Next's audio to the synth's output; nStep is the
+	// link's rate over the output's
+	void MixInto(float* pOut, size_t nFrames, float nGain, float nStep) { m_Ring.MixInto(pOut, nFrames, nGain, nStep); }
 
 	// For the log: frames received, ring level, overruns, underruns
 	void LogStatus() const;

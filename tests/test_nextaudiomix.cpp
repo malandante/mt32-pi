@@ -155,6 +155,27 @@ int main()
 		Check(bInRange && (Out[0] == 1.0f || Out[2] == 1.0f), "synth plus Next is clipped to -1..1");
 	}
 
+	// 3b. The link slower than the output: 32 kHz in, 48 kHz out
+	{
+		NextAudio::CRing<1024> Ring;
+		// A slow ramp after the first sample (which only primes the DC
+		// blocker), so interpolated frames are easy to check
+		std::vector<uint32_t> Words(2 * 900);
+		for (size_t i = 0; i < Words.size(); ++i)
+			Words[i] = static_cast<uint32_t>(static_cast<int32_t>((i / 2) * 2048));
+		Ring.Put(Words.data(), 900);
+		const size_t nBefore = Ring.Level();
+		std::vector<float> Out(2 * 600, 0.0f);
+		Ring.MixInto(Out.data(), 600, 1.0f, 32000.0f / 48000.0f);
+		const size_t nUsed = nBefore - Ring.Level();
+		// 600 frames at 48 kHz take 400 at 32 kHz
+		Check(nUsed == 400, "32 kHz link, 48 kHz output: 3 frames out for every 2 in");
+		// Between two received frames the output moves in thirds
+		const float d1 = Out[2 * 301] - Out[2 * 300], d2 = Out[2 * 302] - Out[2 * 301];
+		Check(std::fabs(d1 - d2) < 1e-4f && d1 != 0.0f, "frames in between are interpolated");
+		Check(Ring.Underruns() == 0, "no underrun while there are frames");
+	}
+
 	// 4. A floating GPIO 20 (the Next's I2S off): random bits come out silent
 	{
 		NextAudio::CRing<1024> Ring;
