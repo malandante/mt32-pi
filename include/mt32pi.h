@@ -279,6 +279,12 @@ private:
 	// Audio output
 	CSoundBaseDevice* m_pSound;
 	CNextAudioInput* m_pNextAudio;
+	// next_input_rate, kept to 8000-48000 Hz
+	unsigned NextInputRate() const
+	{
+		const int n = m_pConfig->AudioNextInputRate;
+		return n < 8000 ? 8000 : n > 48000 ? 48000 : static_cast<unsigned>(n);
+	}
 
 	// [golem] loudness: set by the main task, applied by the audio task
 	volatile bool m_bLoudness;

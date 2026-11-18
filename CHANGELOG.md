@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `next_input`: a whine and crackle over the Next's sound at 48 kHz. The
+  Next's I2S data came back too late for the Pi to read it reliably (worse
+  with the Golem Link's resistors and cable). The link now runs at its own
+  rate, `next_input_rate` (32000 by default), and the Next's sound is
+  converted to `sample_rate`.
+
 ## [golem-1.3.0] - 2026-11-09
 
 For golem-next 1.3.0 (`.gparam`). Checked on a Next with a Raspberry Pi 4,

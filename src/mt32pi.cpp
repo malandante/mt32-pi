@@ -351,7 +351,7 @@ bool CMT32Pi::Initialize(bool bSerialMIDIAvailable)
 		else
 		{
 			LCDLog(TLCDLogType::Startup, "Init Next audio in");
-			m_pNextAudio = new CNextAudioInput(m_pInterrupt, m_pConfig->AudioSampleRate, m_pConfig->AudioChunkSize);
+			m_pNextAudio = new CNextAudioInput(m_pInterrupt, NextInputRate(), m_pConfig->AudioChunkSize);
 		}
 	}
 
@@ -722,6 +722,8 @@ void CMT32Pi::AudioTask()
 
 	const size_t nQueueSizeFrames = m_pSound->GetQueueSizeFrames();
 	const float nNextInputGain = m_pConfig->AudioNextInputGain;
+	// The I2S link from the Next runs at its own rate (next_input_rate)
+	const float nNextInputStep = static_cast<float>(NextInputRate()) / static_cast<float>(m_pConfig->AudioSampleRate);
 	bool bLimiting = false;
 
 	// Extra byte so that we can write to the 24-bit buffer with overlapping 32-bit writes (efficiency)
@@ -753,7 +755,7 @@ void CMT32Pi::AudioTask()
 			bLimiting = false;
 
 		if (m_pNextAudio)
-			m_pNextAudio->MixInto(FloatBuffer, nFrames, nNextInputGain);
+			m_pNextAudio->MixInto(FloatBuffer, nFrames, nNextInputGain, nNextInputStep);
 
 		if (bReversedStereo)
 		{
