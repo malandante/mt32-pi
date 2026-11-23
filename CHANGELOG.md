@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Ready for the Golem out of the box: `output_device = i2s` is now the
+  default and the packaged `mt32-pi.cfg` needs no editing (31250 baud and
+  `gpio_thru = off` already were).
+- All the Next's sound through the Golem is no longer experimental:
+  `[audio] next_input` with `output_device = pwm` (or `hdmi`) is the setup
+  for a VGA monitor or a monitor without speakers. A limiter at unity gain
+  keeps the synth plus the Next's sound from clipping.
+- The headphone jack (PWM) made the most of: `[audio] pwm_oversampling`
+  (on by default: the PWM at twice the sample rate, through a half-band
+  interpolator) and `pwm_dither` (`off`, `on`, `shaped`*: TPDF dither, and
+  with the oversampling third-order noise shaping with zeros at 0 and
+  12 kHz). The levels are computed in the firmware and reach Circle's PWM
+  conversion exactly; silence stays still. Host test: 20 Hz-16 kHz error of
+  a quiet tone 8.5 dB below the plain conversion, without its distortion.
+
 ### Fixed
 
 - `next_input`: a whine and crackle over the Next's sound at 48 kHz. The
@@ -14,6 +31,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with the Golem Link's resistors and cable). The link now runs at its own
   rate, `next_input_rate` (32000 by default), and the Next's sound is
   converted to `sample_rate`.
+- The SD card ships with GeneralUser GS again: golem-1.2.0 went out without
+  it (its Google Drive download failed silently). It now comes from its
+  author's GitHub repository, and a package without it is not built.
+- A click when an MT-32 reset arrived while a reverb tail was still sounding
+  (Munt cuts it at once), and when a new OPL3 player replaced one still
+  releasing notes (stop, GM System On, bank change): the sound now fades out
+  in 5 ms, the cut is made in silence and it fades back in. The MIDI that
+  follows waits meanwhile, so its order is kept.
 
 ## [golem-1.3.0] - 2026-11-09
 

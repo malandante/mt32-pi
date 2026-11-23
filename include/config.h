@@ -44,6 +44,11 @@ public:
 		ENUM(Nuked, nuked)          \
 		ENUM(DOSBox, dosbox)
 
+	#define ENUM_PWMDITHER(ENUM) \
+		ENUM(Off, off)          \
+		ENUM(On, on)            \
+		ENUM(Shaped, shaped)
+
 	#define ENUM_AUDIOOUTPUTDEVICE(ENUM) \
 		ENUM(PWM, pwm)                   \
 		ENUM(HDMI, hdmi)                 \
@@ -87,6 +92,7 @@ public:
 	CONFIG_ENUM(TNetworkMode, ENUM_NETWORKMODE);
 	CONFIG_ENUM(TMIDIUSBOut, ENUM_MIDIUSBOUT);
 	CONFIG_ENUM(TOPL3Emulator, ENUM_OPL3EMULATOR);
+	CONFIG_ENUM(TPWMDither, ENUM_PWMDITHER);
 
 	CConfig();
 	bool Initialize(const char* pPath);
@@ -116,6 +122,7 @@ public:
 	static bool ParseOption(const char* pString, TNetworkMode* pOut);
 	static bool ParseOption(const char* pString, TMIDIUSBOut* pOut);
 	static bool ParseOption(const char* pString, TOPL3Emulator* pOut);
+	static bool ParseOption(const char* pString, TPWMDither* pOut);
 
 private:
 	static int INIHandler(void* pUser, const char* pSection, const char* pName, const char* pValue);
