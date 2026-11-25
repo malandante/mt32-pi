@@ -20,7 +20,10 @@
 // mt32-pi. If not, see <http://www.gnu.org/licenses/>.
 //
 
+#include <circle/bcm2835.h>
+#include <circle/memio.h>
 #include <circle/memory.h>
+#include <circle/synchronize.h>
 #include <circle/serial.h>
 #include <circle/sound/hdmisoundbasedevice.h>
 #include <circle/sound/i2ssoundbasedevice.h>
@@ -215,6 +218,32 @@ CMT32Pi::~CMT32Pi()
 {
 }
 
+// Test build (test/gpio-pads): drive strength and slew rate of GPIO 0-27,
+// which hold the UART (14, 15) and the I2S to the Next (18-21). Weaker,
+// slower edges on the UART's TX to see whether its bytes stop disturbing the
+// I2S (pops on the Next's HDMI while the Pi sends to the Next). Pads
+// control register for bank 0 (BCM2835-2711): password 5A in the top byte,
+// bit 4 hysteresis, bit 3 = 1 slew rate not limited, bits 0-2 drive.
+static void SetGPIOPads(int nDrive, bool bSlewLimit)
+{
+	if (nDrive < 0 && !bSlewLimit)
+		return;
+
+	const uintptr nPads = ARM_IO_BASE + 0x10002C;
+	PeripheralEntry();
+	const u32 nBefore = read32(nPads) & 0x1F;
+	u32 nValue = nBefore;
+	if (nDrive >= 0)
+		nValue = (nValue & ~7u) | (static_cast<u32>(nDrive) & 7);
+	if (bSlewLimit)
+		nValue &= ~(1u << 3);
+	write32(nPads, 0x5A000000 | nValue);
+	PeripheralExit();
+
+	LOGNOTE("GPIO 0-27 pads: %02X -> %02X (drive %u mA, slew %s)", nBefore, nValue, 2 * ((nValue & 7) + 1),
+	        (nValue & 8) ? "fast" : "limited");
+}
+
 bool CMT32Pi::Initialize(bool bSerialMIDIAvailable)
 {
 	m_bSerialMIDIAvailable = bSerialMIDIAvailable;
@@ -352,6 +381,8 @@ bool CMT32Pi::Initialize(bool bSerialMIDIAvailable)
 	m_pSound->SetWriteFormat(Format);
 	if (!m_pSound->AllocateQueueFrames(nQueueSize))
 		LOGPANIC("Failed to allocate sound queue");
+
+	SetGPIOPads(m_pConfig->GolemGPIODrive, m_pConfig->GolemGPIOSlewLimit);
 
 	// All the Next's sound through the Golem: its own audio over I2S, mixed
 	// into a PWM or HDMI output (with I2S output it would go back into the Next)
