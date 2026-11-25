@@ -59,8 +59,10 @@ CFG(effects,			int,				GolemEffects,				-1						)
 CFG(keys,			bool,				GolemKeysToNext,			false						)
 // Test build (test/gpio-pads): GPIO 0-27 drive, 0-7 = 2-16 mA (-1 as it is),
 // and slew rate limited; the UART and the I2S to the Next are in that bank
-CFG(gpio_drive,			int,				GolemGPIODrive,				0						)
-CFG(gpio_slew_limit,		bool,				GolemGPIOSlewLimit,			true						)
+CFG(gpio_drive,			int,				GolemGPIODrive,				-1						)
+CFG(gpio_slew_limit,		bool,				GolemGPIOSlewLimit,			false						)
+// Test build (test/silence-gate): below -60 dBFS for 50 ms, exact zero out
+CFG(silence_gate,		bool,				GolemSilenceGate,			true						)
 CFG(loudness,			bool,				GolemLoudness,				false						)
 CFG(loudness_gain,		float,				GolemLoudnessGain,			4.0f						)
 END_SECTION

@@ -796,6 +796,12 @@ void CMT32Pi::AudioTask()
 	// array, so the conversion wrote over FloatBuffer on the stack)
 	s8 IntBuffer[nQueueSizeFrames * nBytesPerFrame + (bI2S ? 0 : 1)];
 
+	// Test build (test/silence-gate): -60 dBFS for 50 ms, then exact zero
+	const bool bSilenceGate = m_pConfig->GolemSilenceGate;
+	constexpr float SilenceGateLevel = 1.0f / 1024.0f;
+	const size_t nGateFrames = m_pConfig->AudioSampleRate / 20;
+	size_t nQuietFrames = 0;
+
 	DiagCapture::Init(m_pConfig->AudioSampleRate);
 
 	while (m_bRunning)
@@ -831,6 +837,26 @@ void CMT32Pi::AudioTask()
 		{
 			m_pNextAudio->MixInto(FloatBuffer, nFrames, nNextInputGain, nNextInputStep);
 			m_MixLimiter.Process(FloatBuffer, nFrames);
+		}
+		// Test build (test/silence-gate): a near silence (a reverb's tail,
+		// a voice's last bits) sent as exact zero. The Next's HDMI pops while
+		// the UART carries bytes, but only when the I2S data is not all zero
+		if (bSilenceGate)
+		{
+			float nPeak = 0.0f;
+			for (size_t i = 0; i < nFrames * nChannels; ++i)
+			{
+				const float nAbs = FloatBuffer[i] < 0.0f ? -FloatBuffer[i] : FloatBuffer[i];
+				if (nAbs > nPeak)
+					nPeak = nAbs;
+			}
+			if (nPeak >= SilenceGateLevel)
+				nQuietFrames = 0;
+			else if (nQuietFrames < nGateFrames)
+				nQuietFrames += nFrames;
+			if (nQuietFrames >= nGateFrames)
+				for (size_t i = 0; i < nFrames * nChannels; ++i)
+					FloatBuffer[i] = 0.0f;
 		}
 		DiagCapture::Audio(FloatBuffer, nFrames, true);
 
